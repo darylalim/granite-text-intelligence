@@ -1,8 +1,8 @@
-# News Article Summarizer
+# Granite Pipeline
 
-Streamlit web app for summarizing news articles using [granite-4.0-h-1b](https://huggingface.co/ibm-granite/granite-4.0-h-1b) by IBM via `mlx-lm`. Articles are extracted from URLs using [newspaper4k](https://github.com/AndyTheFactory/newspaper4k). Long articles are split into token-aware chunks before summarization. Summaries accumulate into a session collection that can be reordered, removed, and exported as JSON or CSV.
+**Granite Pipeline** analyzes text with IBM's [granite-4.1-8b](https://huggingface.co/ibm-granite/granite-4.1-8b) running locally on Apple Silicon via `mlx-lm` (MLX acceleration). It's a single-shot playground: provide text, choose which analyses to run, and get **summarization, topic detection, intent recognition, and sentiment** back — all powered by prompting one Granite model.
 
-Requires Apple Silicon (M-series Mac).
+Requires an Apple Silicon (M-series) Mac with ~24 GB+ of unified memory (32 GB recommended) — the 8B model uses ~16.8 GB in bf16.
 
 ## Setup
 
@@ -11,27 +11,37 @@ uv sync
 uv run streamlit run streamlit_app.py
 ```
 
-The model (~2.9 GB) downloads automatically on first run.
+The model (~16.8 GB, bf16) downloads automatically on first run.
+
+### Hugging Face token (optional)
+
+The Granite model is public, so no token is required. Without one, the Hugging Face Hub logs a `You are sending unauthenticated requests to the HF Hub` warning and applies lower rate limits and slower downloads.
+
+To authenticate, copy the template and set a token with **read** scope ([create one](https://huggingface.co/settings/tokens)):
+
+```bash
+cp .env.example .env
+# then edit .env and set HF_TOKEN=hf_...
+```
+
+`.env` is gitignored and loaded automatically via `python-dotenv`.
+
+**Deployment:** set `HF_TOKEN` as an environment variable in your platform's secrets instead of shipping `.env`. `load_dotenv()` does not override real env vars and no-ops when no `.env` is present, so the same code works locally and in production.
 
 ## Usage
 
-1. Paste a news article URL and click **Summarize**
-2. The article is extracted, chunked, and summarized, then added to the session collection
-3. View each article's original text and summary side by side
-4. Review metrics: word counts, compression ratio, duration, token counts
-5. Reorder or remove articles from the collection
-6. Adjust generation parameters in the sidebar
-7. Export the full collection as JSON or CSV
+1. Provide text via one of the **Text**, **Upload**, or **Sample** tabs (when more than one has content, precedence is Text > Upload > Sample).
+2. Toggle the analyses you want: **Summarization**, **Topic Detection**, **Intent Recognition**, **Sentiment**.
+3. Click **Run**.
+4. Read the results in the per-feature tabs, plus a combined **JSON** tab.
 
 ## Features
 
-- **Session collection** — summaries accumulate across the session
-- **Side-by-side display** — original article text and generated summary in two columns
-- **Generation controls** — sidebar sliders for max_tokens, temp, top_p, and repetition_penalty, with a reset-to-defaults button
-- **Article metadata** — title, authors, publish date, keywords, and source URL
-- **Word count metrics** — original word count, summary word count, and compression ratio
-- **Collection management** — reorder (Up/Down) and remove articles
-- **JSON/CSV export** — download the full collection with metadata, metrics, and generation parameters
+- **Four analyses** — summarization (prose), plus topic detection, intent recognition, and sentiment (structured JSON), each a task-specific Granite prompt
+- **Three input sources** — paste text, upload a `.txt`/`.md` file, or pick a built-in sample
+- **Per-feature toggles** — run exactly the analyses you want; each description lives in the toggle's tooltip
+- **Tabbed results** — readable per-feature views plus a combined JSON view
+- **Local and private** — runs entirely on-device via MLX; no text leaves your Mac
 
 ## Development
 

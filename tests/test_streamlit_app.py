@@ -1,359 +1,274 @@
-import csv
-import io
+import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from streamlit_app import (
-    DEFAULT_GENERATION_PARAMS,
-    MAX_CHUNK_TOKENS,
-    MODEL_NAME,
-    SUMMARIZE_PROMPT,
-    chunk,
-    collection_to_csv,
-    extract,
-    summarize,
+    FEATURES,
+    LABELS,
+    MAX_INPUT_TOKENS,
+    parse_json_output,
+    render_result,
+    resolve_input,
+    run_feature,
+    truncate_to_tokens,
 )
 
 
-class TestDefaultGenerationParams:
-    def test_has_expected_keys(self) -> None:
-        expected_keys = {
-            "max_tokens",
-            "temp",
-            "top_p",
-            "repetition_penalty",
+class TestFeatures:
+    def test_four_features_in_order(self) -> None:
+        assert [feature["key"] for feature in FEATURES] == [
+            "summary",
+            "topics",
+            "intents",
+            "sentiment",
+        ]
+
+    def test_each_feature_has_required_fields(self) -> None:
+        for feature in FEATURES:
+            for field in (
+                "key",
+                "label",
+                "tab_label",
+                "help",
+                "output",
+                "max_tokens",
+                "system",
+                "user_template",
+            ):
+                assert field in feature
+            assert "{text}" in feature["user_template"]
+            assert feature["output"] in ("prose", "json")
+
+    def test_only_summary_is_prose(self) -> None:
+        assert FEATURES[0]["output"] == "prose"
+        assert all(feature["output"] == "json" for feature in FEATURES[1:])
+
+    def test_labels_match_features(self) -> None:
+        assert LABELS == {feature["key"]: feature["label"] for feature in FEATURES}
+
+    def test_json_features_embed_valid_schema(self) -> None:
+        for feature in FEATURES:
+            if feature["output"] != "json":
+                continue
+            schema_text = (
+                feature["system"].split("<schema>\n", 1)[1].split("\n</schema>", 1)[0]
+            )
+            schema = json.loads(schema_text)
+            assert isinstance(schema, dict)
+            assert "properties" in schema
+            assert "JSON" in feature["user_template"]
+
+
+class TestParseJsonOutput:
+    def test_plain_json(self) -> None:
+        assert parse_json_output('{"a": 1}') == {"a": 1}
+
+    def test_json_embedded_in_text(self) -> None:
+        assert parse_json_output('Here you go: {"a": 1} done') == {"a": 1}
+
+    def test_json_in_code_fence(self) -> None:
+        assert parse_json_output('```json\n{"sentiment": "positive"}\n```') == {
+            "sentiment": "positive"
         }
-        assert set(DEFAULT_GENERATION_PARAMS.keys()) == expected_keys
 
-    def test_has_expected_values(self) -> None:
-        assert DEFAULT_GENERATION_PARAMS["max_tokens"] == 256
-        assert DEFAULT_GENERATION_PARAMS["temp"] == 0.0
-        assert DEFAULT_GENERATION_PARAMS["top_p"] == 1.0
-        assert DEFAULT_GENERATION_PARAMS["repetition_penalty"] == 1.2
+    def test_invalid_returns_none(self) -> None:
+        assert parse_json_output("not json at all") is None
 
+    def test_malformed_braces_return_none(self) -> None:
+        assert parse_json_output("{not: valid}") is None
 
-class TestExtract:
-    @patch("streamlit_app.Article")
-    def test_returns_article(self, mock_article_cls: MagicMock) -> None:
-        mock_article = MagicMock()
-        mock_article.title = "Breaking News"
-        mock_article.authors = ["Jane Doe"]
-        mock_article.publish_date = "2026-01-15"
-        mock_article.text = "Article body text."
-        mock_article_cls.return_value = mock_article
+    def test_first_object_when_multiple(self) -> None:
+        assert parse_json_output('prefix {"a": 1} middle {"b": 2} suffix') == {"a": 1}
 
-        result = extract("https://example.com/article")
+    def test_recovers_object_after_stray_braces(self) -> None:
+        assert parse_json_output(
+            'I think {maybe} the answer is {"sentiment": "positive"}'
+        ) == {"sentiment": "positive"}
 
-        mock_article_cls.assert_called_once_with("https://example.com/article")
-        mock_article.download.assert_called_once()
-        mock_article.parse.assert_called_once()
-        mock_article.nlp.assert_called_once()
-        assert result is mock_article
+    def test_top_level_array_returns_none(self) -> None:
+        assert parse_json_output("[1, 2, 3]") is None
 
-    @patch("streamlit_app.Article")
-    def test_download_failure_propagates(self, mock_article_cls: MagicMock) -> None:
-        mock_article = MagicMock()
-        mock_article.download.side_effect = Exception("Network error")
-        mock_article_cls.return_value = mock_article
-
-        with pytest.raises(Exception, match="Network error"):
-            extract("https://example.com/article")
+    def test_scalar_json_returns_none(self) -> None:
+        assert parse_json_output("true") is None
+        assert parse_json_output("42") is None
+        assert parse_json_output('"hello"') is None
 
 
-class TestChunk:
-    def test_short_text_single_chunk(self) -> None:
+class TestResolveInput:
+    def test_pasted_wins(self) -> None:
+        assert resolve_input("typed", "uploaded", "sample") == "typed"
+
+    def test_upload_when_no_pasted(self) -> None:
+        assert resolve_input("", "uploaded", "sample") == "uploaded"
+
+    def test_sample_when_neither(self) -> None:
+        assert resolve_input("", "", "sample") == "sample"
+
+    def test_all_empty(self) -> None:
+        assert resolve_input("", "", "") == ""
+
+    def test_strips_whitespace(self) -> None:
+        assert resolve_input("  spaced  ", "", "") == "spaced"
+
+    def test_whitespace_only_pasted_falls_through(self) -> None:
+        assert resolve_input("   ", "uploaded", "sample") == "uploaded"
+
+
+class TestTruncateToTokens:
+    def test_short_text_unchanged(self) -> None:
         tokenizer = MagicMock()
-        tokenizer.encode.return_value = list(range(100))
+        tokenizer.encode.return_value = list(range(10))
 
-        result = chunk("Short article text.", tokenizer)
+        text, truncated = truncate_to_tokens("hello", tokenizer)
 
-        assert result == ["Short article text."]
-        tokenizer.encode.assert_called_once_with(
-            "Short article text.", add_special_tokens=False
-        )
-
-    def test_long_text_splits_into_chunks(self) -> None:
-        tokenizer = MagicMock()
-        tokenizer.encode.return_value = list(range(MAX_CHUNK_TOKENS * 2))
-        tokenizer.decode.side_effect = ["chunk one text", "chunk two text"]
-
-        result = chunk("Long article text.", tokenizer)
-
-        assert result == ["chunk one text", "chunk two text"]
-        assert tokenizer.decode.call_count == 2
-        tokenizer.decode.assert_any_call(
-            list(range(MAX_CHUNK_TOKENS)), skip_special_tokens=True
-        )
-        tokenizer.decode.assert_any_call(
-            list(range(MAX_CHUNK_TOKENS, MAX_CHUNK_TOKENS * 2)),
-            skip_special_tokens=True,
-        )
-
-    def test_exact_max_tokens_single_chunk(self) -> None:
-        tokenizer = MagicMock()
-        tokenizer.encode.return_value = list(range(MAX_CHUNK_TOKENS))
-
-        result = chunk("Exactly max tokens.", tokenizer)
-
-        assert result == ["Exactly max tokens."]
+        assert text == "hello"
+        assert truncated is False
         tokenizer.decode.assert_not_called()
 
-    def test_max_plus_one_tokens_splits(self) -> None:
+    def test_long_text_truncated(self) -> None:
         tokenizer = MagicMock()
-        tokenizer.encode.return_value = list(range(MAX_CHUNK_TOKENS + 1))
-        tokenizer.decode.side_effect = ["chunk one text", "chunk two text"]
+        tokenizer.encode.return_value = list(range(MAX_INPUT_TOKENS + 50))
+        tokenizer.decode.return_value = "truncated text"
 
-        result = chunk("Just over max tokens.", tokenizer)
+        text, truncated = truncate_to_tokens("long", tokenizer)
 
-        assert result == ["chunk one text", "chunk two text"]
-        assert tokenizer.decode.call_count == 2
-        tokenizer.decode.assert_any_call(
-            list(range(MAX_CHUNK_TOKENS)), skip_special_tokens=True
+        assert truncated is True
+        assert text == "truncated text"
+        tokenizer.decode.assert_called_once_with(
+            list(range(MAX_INPUT_TOKENS)), skip_special_tokens=True
         )
-        tokenizer.decode.assert_any_call([MAX_CHUNK_TOKENS], skip_special_tokens=True)
 
-    def test_empty_text_returns_empty(self) -> None:
+    def test_boundary_not_truncated(self) -> None:
         tokenizer = MagicMock()
-        tokenizer.encode.return_value = []
+        tokenizer.encode.return_value = list(range(MAX_INPUT_TOKENS))
 
-        result = chunk("", tokenizer)
+        _, truncated = truncate_to_tokens("boundary", tokenizer)
 
-        assert result == []
+        assert truncated is False
+        tokenizer.decode.assert_not_called()
+
+    def test_encode_excludes_special_tokens(self) -> None:
+        tokenizer = MagicMock()
+        tokenizer.encode.return_value = list(range(10))
+
+        truncate_to_tokens("hello", tokenizer)
+
+        tokenizer.encode.assert_called_once_with("hello", add_special_tokens=False)
 
 
-class TestSummarize:
-    @patch("streamlit_app.make_logits_processors")
-    @patch("streamlit_app.make_sampler")
+def _tokenizer() -> MagicMock:
+    tokenizer = MagicMock()
+    tokenizer.apply_chat_template.return_value = "PROMPT"
+    return tokenizer
+
+
+class TestRunFeature:
     @patch("streamlit_app.generate")
-    def test_returns_response_and_counts(
-        self,
-        mock_generate: MagicMock,
-        mock_make_sampler: MagicMock,
-        mock_make_logits_processors: MagicMock,
-    ) -> None:
-        tokenizer = MagicMock()
-        tokenizer.apply_chat_template.return_value = "formatted prompt"
-        tokenizer.encode.side_effect = [
-            [1, 2, 3, 4, 5],  # prompt tokens
-            [1, 2, 3],  # output tokens
-        ]
-        mock_generate.return_value = "A short summary."
-        mock_sampler = MagicMock()
-        mock_make_sampler.return_value = mock_sampler
-        mock_processors = MagicMock()
-        mock_make_logits_processors.return_value = mock_processors
-        model = MagicMock()
+    def test_prose_feature_returns_raw_unparsed(self, mock_generate: MagicMock) -> None:
+        mock_generate.return_value = "  A concise summary.  "
 
-        response, prompt_eval_count, eval_count = summarize(
-            ["Some long document text."], model, tokenizer
-        )
+        result = run_feature(FEATURES[0], "text", MagicMock(), _tokenizer())
 
-        assert response == "A short summary."
-        assert prompt_eval_count == 5
-        assert eval_count == 3
-        tokenizer.apply_chat_template.assert_called_once_with(
-            [
-                {
-                    "role": "user",
-                    "content": f"{SUMMARIZE_PROMPT}Some long document text.",
-                }
-            ],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-        mock_make_sampler.assert_called_once_with(temp=0.0, top_p=1.0)
-        mock_make_logits_processors.assert_called_once_with(repetition_penalty=1.2)
-        mock_generate.assert_called_once_with(
-            model,
-            tokenizer,
-            prompt="formatted prompt",
-            max_tokens=256,
-            sampler=mock_sampler,
-            logits_processors=mock_processors,
-        )
+        assert result["raw"] == "A concise summary."
+        assert result["parsed"] is None
 
-    @patch("streamlit_app.make_logits_processors")
-    @patch("streamlit_app.make_sampler")
     @patch("streamlit_app.generate")
-    def test_multi_chunk_concatenates(
-        self,
-        mock_generate: MagicMock,
-        mock_make_sampler: MagicMock,
-        mock_make_logits_processors: MagicMock,
-    ) -> None:
-        tokenizer = MagicMock()
-        tokenizer.apply_chat_template.side_effect = ["prompt one", "prompt two"]
-        tokenizer.encode.side_effect = [
-            [1, 2, 3],  # prompt 1 tokens
-            [1, 2],  # output 1 tokens
-            [4, 5],  # prompt 2 tokens
-            [1, 2, 3],  # output 2 tokens
-        ]
-        mock_generate.side_effect = ["Summary one.", "Summary two."]
-        model = MagicMock()
+    def test_json_feature_parses_output(self, mock_generate: MagicMock) -> None:
+        mock_generate.return_value = '{"sentiment": "positive", "confidence": 0.9}'
 
-        response, prompt_eval_count, eval_count = summarize(
-            ["Chunk one text.", "Chunk two text."], model, tokenizer
-        )
+        result = run_feature(FEATURES[3], "text", MagicMock(), _tokenizer())
 
-        assert response == "Summary one. Summary two."
-        assert prompt_eval_count == 5  # 3 + 2
-        assert eval_count == 5  # 2 + 3
-        assert mock_generate.call_count == 2
-        assert tokenizer.apply_chat_template.call_count == 2
+        assert result["parsed"] == {"sentiment": "positive", "confidence": 0.9}
 
-    @patch("streamlit_app.make_logits_processors")
-    @patch("streamlit_app.make_sampler")
     @patch("streamlit_app.generate")
-    def test_custom_generation_params(
-        self,
-        mock_generate: MagicMock,
-        mock_make_sampler: MagicMock,
-        mock_make_logits_processors: MagicMock,
+    def test_json_feature_unparseable_returns_none(
+        self, mock_generate: MagicMock
     ) -> None:
-        tokenizer = MagicMock()
-        tokenizer.apply_chat_template.return_value = "formatted prompt"
-        tokenizer.encode.side_effect = [
-            [1, 2, 3],  # prompt tokens
-            [1, 2],  # output tokens
-        ]
-        mock_generate.return_value = "Custom summary."
-        model = MagicMock()
+        mock_generate.return_value = "totally not json"
 
-        custom_params: dict[str, int | float] = {
-            "max_tokens": 512,
-            "temp": 0.7,
-            "top_p": 0.9,
-            "repetition_penalty": 1.5,
-        }
+        result = run_feature(FEATURES[1], "text", MagicMock(), _tokenizer())
 
-        response, prompt_eval_count, eval_count = summarize(
-            ["Some text."], model, tokenizer, custom_params
-        )
+        assert result["parsed"] is None
+        assert result["raw"] == "totally not json"
 
-        assert response == "Custom summary."
-        mock_make_sampler.assert_called_once_with(temp=0.7, top_p=0.9)
-        mock_make_logits_processors.assert_called_once_with(repetition_penalty=1.5)
+    @patch("streamlit_app.generate")
+    def test_applies_chat_template_and_max_tokens(
+        self, mock_generate: MagicMock
+    ) -> None:
+        mock_generate.return_value = "{}"
+        tokenizer = _tokenizer()
+
+        run_feature(FEATURES[1], "hello world", MagicMock(), tokenizer)
+
+        messages = tokenizer.apply_chat_template.call_args[0][0]
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert "hello world" in messages[1]["content"]
         call_kwargs = mock_generate.call_args[1]
-        assert call_kwargs["max_tokens"] == 512
+        assert call_kwargs["prompt"] == "PROMPT"
+        assert call_kwargs["max_tokens"] == FEATURES[1]["max_tokens"]
 
+    @patch("streamlit_app.make_logits_processors")
+    @patch("streamlit_app.make_sampler")
     @patch("streamlit_app.generate")
-    def test_empty_chunks(self, mock_generate: MagicMock) -> None:
-        model = MagicMock()
-        tokenizer = MagicMock()
+    def test_prose_uses_greedy_sampler_and_repetition_penalty(
+        self,
+        mock_generate: MagicMock,
+        mock_make_sampler: MagicMock,
+        mock_make_logits: MagicMock,
+    ) -> None:
+        mock_generate.return_value = "summary"
+        mock_make_sampler.return_value = "SAMPLER"
+        mock_make_logits.return_value = "PROCS"
 
-        response, prompt_eval_count, eval_count = summarize([], model, tokenizer)
+        run_feature(FEATURES[0], "text", MagicMock(), _tokenizer())
 
-        assert response == ""
-        assert prompt_eval_count == 0
-        assert eval_count == 0
-        tokenizer.apply_chat_template.assert_not_called()
-        mock_generate.assert_not_called()
+        mock_make_sampler.assert_called_once_with(temp=0.0, top_p=1.0)
+        mock_make_logits.assert_called_once_with(repetition_penalty=1.2)
+        call_kwargs = mock_generate.call_args[1]
+        assert call_kwargs["sampler"] == "SAMPLER"
+        assert call_kwargs["logits_processors"] == "PROCS"
 
+    @patch("streamlit_app.make_logits_processors")
+    @patch("streamlit_app.make_sampler")
+    @patch("streamlit_app.generate")
+    def test_json_feature_skips_repetition_penalty(
+        self,
+        mock_generate: MagicMock,
+        mock_make_sampler: MagicMock,
+        mock_make_logits: MagicMock,
+    ) -> None:
+        mock_generate.return_value = "{}"
 
-def _make_collection_item(
-    **overrides: object,
-) -> dict[str, object]:
-    defaults: dict[str, object] = {
-        "_id": "test-uuid",
-        "model": MODEL_NAME,
-        "url": "https://example.com",
-        "title": "Test Article",
-        "authors": ["Alice", "Bob"],
-        "publish_date": "2026-01-15",
-        "keywords": ["news", "test"],
-        "original_text": "Original text here.",
-        "response": "Summary text here.",
-        "total_duration": 1.5,
-        "chunk_count": 1,
-        "prompt_eval_count": 100,
-        "eval_count": 30,
-        "original_word_count": 3,
-        "summary_word_count": 3,
-        "compression_ratio": 1.0,
-        "generation_params": dict(DEFAULT_GENERATION_PARAMS),
-    }
-    defaults.update(overrides)
-    return defaults
+        run_feature(FEATURES[3], "text", MagicMock(), _tokenizer())
+
+        mock_make_sampler.assert_called_once_with(temp=0.0, top_p=1.0)
+        mock_make_logits.assert_not_called()
+        assert mock_generate.call_args[1]["logits_processors"] is None
 
 
-class TestCollectionToCsv:
-    def test_single_item(self) -> None:
-        collection = [_make_collection_item()]
+class TestRenderResult:
+    @patch("streamlit_app.st")
+    def test_intent_value_coerced_to_string(self, mock_st: MagicMock) -> None:
+        render_result("intents", {"raw": "x", "parsed": {"intent": ["a", "b"]}})
+        _, value = mock_st.metric.call_args[0]
+        assert isinstance(value, str)
 
-        result = collection_to_csv(collection)
-        reader = csv.DictReader(io.StringIO(result))
-        rows = list(reader)
+    @patch("streamlit_app.st")
+    def test_sentiment_value_coerced_to_string(self, mock_st: MagicMock) -> None:
+        render_result("sentiment", {"raw": "x", "parsed": {"sentiment": {"x": 1}}})
+        _, value = mock_st.metric.call_args[0]
+        assert isinstance(value, str)
 
-        assert len(rows) == 1
-        assert rows[0]["title"] == "Test Article"
-        assert rows[0]["authors"] == "Alice;Bob"
-        assert rows[0]["keywords"] == "news;test"
-        assert rows[0]["url"] == "https://example.com"
+    @patch("streamlit_app.st")
+    def test_non_list_topics_not_sent_to_dataframe(self, mock_st: MagicMock) -> None:
+        render_result("topics", {"raw": "x", "parsed": {"topics": "politics"}})
+        mock_st.dataframe.assert_not_called()
 
-    def test_flattened_generation_params(self) -> None:
-        collection = [_make_collection_item()]
-
-        result = collection_to_csv(collection)
-        reader = csv.DictReader(io.StringIO(result))
-        rows = list(reader)
-
-        assert rows[0]["max_tokens"] == "256"
-        assert rows[0]["temp"] == "0.0"
-        assert rows[0]["top_p"] == "1.0"
-        assert rows[0]["repetition_penalty"] == "1.2"
-        assert "generation_params" not in rows[0]
-
-    def test_multi_item(self) -> None:
-        collection = [
-            _make_collection_item(title="First Article"),
-            _make_collection_item(title="Second Article", url="https://example.com/2"),
-        ]
-
-        result = collection_to_csv(collection)
-        reader = csv.DictReader(io.StringIO(result))
-        rows = list(reader)
-
-        assert len(rows) == 2
-        assert rows[0]["title"] == "First Article"
-        assert rows[1]["title"] == "Second Article"
-        assert rows[1]["url"] == "https://example.com/2"
-
-    def test_empty_authors_and_keywords(self) -> None:
-        collection = [_make_collection_item(authors=[], keywords=[])]
-
-        result = collection_to_csv(collection)
-        reader = csv.DictReader(io.StringIO(result))
-        rows = list(reader)
-
-        assert rows[0]["authors"] == ""
-        assert rows[0]["keywords"] == ""
-
-    def test_special_characters(self) -> None:
-        collection = [
-            _make_collection_item(
-                original_text='He said, "hello"\nNew line here.',
-                response="Commas, quotes, and\nnewlines.",
-            )
-        ]
-
-        result = collection_to_csv(collection)
-        reader = csv.DictReader(io.StringIO(result))
-        rows = list(reader)
-
-        assert rows[0]["original_text"] == 'He said, "hello"\nNew line here.'
-        assert rows[0]["response"] == "Commas, quotes, and\nnewlines."
-
-    def test_excludes_id_field(self) -> None:
-        collection = [_make_collection_item(_id="test-uuid-123")]
-
-        result = collection_to_csv(collection)
-        reader = csv.DictReader(io.StringIO(result))
-        rows = list(reader)
-
-        assert "_id" not in rows[0]
-
-    def test_empty_collection(self) -> None:
-        result = collection_to_csv([])
-        assert result == ""
+    @patch("streamlit_app.st")
+    def test_numeric_confidence_rendered_as_percent(self, mock_st: MagicMock) -> None:
+        render_result(
+            "sentiment",
+            {"raw": "x", "parsed": {"sentiment": "positive", "confidence": 0.9}},
+        )
+        captions = [call.args[0] for call in mock_st.caption.call_args_list]
+        assert any("90%" in str(text) for text in captions)

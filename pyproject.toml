@@ -1,13 +1,11 @@
 [project]
-name = "news-article-summarizer"
+name = "granite-pipeline"
 version = "0.1.0"
-description = "Streamlit web app for summarizing news articles using granite-4.0-h-1b"
+description = "Analyze text using summarization, topic detection, intent recognition, and sentiment analysis with the IBM Granite 4.1 model on Apple Silicon with MLX."
 requires-python = ">=3.12"
 dependencies = [
-    "lxml_html_clean",
     "mlx-lm",
-    "newspaper4k",
-    "nltk",
+    "python-dotenv>=1.2.2",
     "streamlit",
 ]
 
