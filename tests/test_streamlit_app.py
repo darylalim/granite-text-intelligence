@@ -57,6 +57,19 @@ class TestFeatures:
             assert "properties" in schema
             assert "JSON" in feature["user_template"]
 
+    def test_json_system_follows_ibm_documented_pattern(self) -> None:
+        # The JSON features reproduce IBM Granite's documented "answer in JSON …
+        # <schema>" system prompt verbatim, including the trailing newline.
+        for feature in FEATURES:
+            if feature["output"] != "json":
+                continue
+            system = feature["system"]
+            assert system.startswith(
+                "You are a helpful assistant that answers in JSON. "
+                "Here's the json schema you must adhere to:\n<schema>\n"
+            )
+            assert system.endswith("\n</schema>\n")
+
 
 class TestParseJsonOutput:
     def test_plain_json(self) -> None:

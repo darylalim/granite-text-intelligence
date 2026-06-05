@@ -24,9 +24,13 @@ TEMP = 0.0
 TOP_P = 1.0
 REPETITION_PENALTY = 1.2
 
+# IBM Granite's documented JSON system-prompt pattern, reproduced verbatim
+# (including the trailing newline) from the official granite-4.1 README/docs.
+# Output is still not guaranteed JSON, so it is parsed defensively — see
+# parse_json_output.
 _JSON_SYSTEM = (
     "You are a helpful assistant that answers in JSON. Here's the json schema "
-    "you must adhere to:\n<schema>\n{schema}\n</schema>"
+    "you must adhere to:\n<schema>\n{schema}\n</schema>\n"
 )
 
 # Each feature is fully described by its prompt, output kind, and token budget.

@@ -62,7 +62,7 @@ model, tokenizer = load("mlx-community/granite-4.1-8b-bf16")
 - `LABELS` — `{key: label}` derived from `FEATURES`.
 - `SAMPLE_TEXTS` — `{name: text}` built-in samples for the Sample tab.
 
-The four features: Summarization (prose, 256 tokens), Topic Detection and Intent Recognition (JSON, 256 tokens), Sentiment (JSON, 128 tokens). The three JSON features use IBM's "answer in JSON … `<schema>`" system-prompt pattern; output is not guaranteed JSON, so it is parsed defensively.
+The four features: Summarization (prose, 256 tokens), Topic Detection and Intent Recognition (JSON, 256 tokens), Sentiment (JSON, 128 tokens). The three JSON features use IBM's "answer in JSON … `<schema>`" system-prompt pattern (reproduced verbatim, including the trailing newline); output is not guaranteed JSON, so it is parsed defensively.
 
 ### Session State
 
@@ -104,7 +104,7 @@ Unexpected exceptions during a run — and during per-feature rendering — are 
 
 `tests/test_streamlit_app.py` — unit tests (mocked, no model download):
 
-- `TestFeatures` — `FEATURES` order, required fields, prose-vs-JSON outputs, `LABELS` mapping, and valid embedded JSON schemas
+- `TestFeatures` — `FEATURES` order, required fields, prose-vs-JSON outputs, `LABELS` mapping, valid embedded JSON schemas, and the IBM-documented JSON system-prompt pattern (incl. the trailing newline)
 - `TestParseJsonOutput` — plain / embedded / code-fenced JSON, first-of-multiple objects, recovery after stray braces, non-object JSON (arrays, scalars) → `None`, unparseable → `None`
 - `TestResolveInput` — input precedence, whitespace stripping (incl. whitespace-only falling through to the next source), all-empty
 - `TestTruncateToTokens` — short / long / boundary cases (uses `MAX_INPUT_TOKENS`), and the `add_special_tokens=False` encode flag
