@@ -78,7 +78,7 @@ A full-width input section sits on top; below it the page splits into two column
 
 ### Functions
 
-- `load_model() -> tuple[nn.Module, PreTrainedTokenizerBase]` — loads model and tokenizer via `mlx_lm.load`, cached with `@st.cache_resource`.
+- `load_model() -> tuple[nn.Module, TokenizerWrapper]` — loads model and tokenizer via `mlx_lm.load`, cached with `@st.cache_resource`.
 - `truncate_to_tokens(text, tokenizer, max_tokens=MAX_INPUT_TOKENS) -> tuple[str, bool]` — truncates to a token budget; returns `(text, was_truncated)`.
 - `parse_json_output(raw) -> dict | None` — returns the first JSON **object** found (tolerates surrounding prose/code fences via `JSONDecoder.raw_decode`); non-object JSON (lists, scalars) and unparseable input return `None`.
 - `resolve_input(pasted, uploaded, sample) -> str` — resolves the active input by precedence (pasted > uploaded > sample); each candidate is stripped first, so a whitespace-only entry falls through.

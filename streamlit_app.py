@@ -7,7 +7,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from mlx_lm import generate, load
 from mlx_lm.sample_utils import make_logits_processors, make_sampler
-from transformers import PreTrainedTokenizerBase
+from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 load_dotenv()  # populate HF_TOKEN from .env; deploy env vars take precedence
 
@@ -140,14 +140,16 @@ if "results" not in st.session_state:
 
 
 @st.cache_resource
-def load_model() -> tuple[nn.Module, PreTrainedTokenizerBase]:
+def load_model() -> tuple[nn.Module, TokenizerWrapper]:
     """Load model and tokenizer, cached for the session."""
-    model, tokenizer = load(MODEL_NAME)
-    return model, tokenizer
+    # load() returns a 2- or 3-tuple (the 3-tuple only when return_config=True,
+    # which we don't pass), so its declared type is a union; narrow to the
+    # 2-tuple we actually get.
+    return cast("tuple[nn.Module, TokenizerWrapper]", load(MODEL_NAME))
 
 
 def truncate_to_tokens(
-    text: str, tokenizer: PreTrainedTokenizerBase, max_tokens: int = MAX_INPUT_TOKENS
+    text: str, tokenizer: TokenizerWrapper, max_tokens: int = MAX_INPUT_TOKENS
 ) -> tuple[str, bool]:
     """Truncate text to at most max_tokens tokens. Returns (text, was_truncated)."""
     token_ids = tokenizer.encode(text, add_special_tokens=False)
@@ -192,7 +194,7 @@ def run_feature(
     feature: dict[str, Any],
     text: str,
     model: nn.Module,
-    tokenizer: PreTrainedTokenizerBase,
+    tokenizer: TokenizerWrapper,
 ) -> dict[str, Any]:
     """Run one feature's prompt and return {"raw": str, "parsed": dict | None}."""
     messages = [
