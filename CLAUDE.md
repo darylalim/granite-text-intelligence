@@ -24,7 +24,7 @@ uv run streamlit run streamlit_app.py
 
 ## Dependencies
 
-- `mlx-lm` — model loading and generation on Apple Silicon (mlx and transformers are transitive deps)
+- `mlx-lm` (pinned `>=0.31,<0.32`) — model loading and generation on Apple Silicon; mlx and transformers are transitive deps. The `<0.32` cap guards against API drift, since decoding params pass through `generate(**kwargs)` rather than typed parameters; exact reproducibility is handled by `uv.lock`.
 - `streamlit` — web UI
 - `python-dotenv` — loads `HF_TOKEN` (and other env vars) from `.env` for local development
 
