@@ -2,7 +2,7 @@
 
 **Granite Pipeline** analyzes text with IBM's [granite-4.1-8b](https://huggingface.co/ibm-granite/granite-4.1-8b) running locally on Apple Silicon via `mlx-lm` (MLX acceleration). It's a single-shot playground: provide text, choose which analyses to run, and get **summarization, topic detection, intent recognition, and sentiment** back — all powered by prompting one Granite model.
 
-Requires an Apple Silicon (M-series) Mac with ~24 GB+ of unified memory (32 GB recommended) — the 8B model uses ~16.8 GB in bf16.
+Requires an Apple Silicon (M-series) Mac with ~24 GB+ of unified memory (32 GB recommended) — the 8B model uses ~16.8 GB in bf16. On lower-memory Macs, set `MODEL_NAME` in `streamlit_app.py` to a 4-bit quant such as `mlx-community/granite-4.1-8b-4bit` (~5.2 GB) to cut memory roughly 3× for a small quality cost.
 
 ## Setup
 
