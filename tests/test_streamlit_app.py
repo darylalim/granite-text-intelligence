@@ -1,10 +1,20 @@
 import json
+import os
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from streamlit_app import (
     FEATURES,
     LABELS,
+    LANGUAGE_AUTO,
+    LANGUAGE_ENGLISH,
     MAX_INPUT_TOKENS,
+    MODEL_MAX_TOKENS,
+    _DEFAULT_MAX_INPUT_TOKENS,
+    _effective_max_tokens,
+    _resolve_max_input_tokens,
+    language_directive,
     parse_json_output,
     render_result,
     resolve_input,
@@ -72,92 +82,101 @@ class TestFeatures:
 
 
 class TestParseJsonOutput:
-    def test_plain_json(self) -> None:
-        assert parse_json_output('{"a": 1}') == {"a": 1}
-
-    def test_json_embedded_in_text(self) -> None:
-        assert parse_json_output('Here you go: {"a": 1} done') == {"a": 1}
-
-    def test_json_in_code_fence(self) -> None:
-        assert parse_json_output('```json\n{"sentiment": "positive"}\n```') == {
-            "sentiment": "positive"
-        }
-
-    def test_invalid_returns_none(self) -> None:
-        assert parse_json_output("not json at all") is None
-
-    def test_malformed_braces_return_none(self) -> None:
-        assert parse_json_output("{not: valid}") is None
-
-    def test_first_object_when_multiple(self) -> None:
-        assert parse_json_output('prefix {"a": 1} middle {"b": 2} suffix') == {"a": 1}
-
-    def test_recovers_object_after_stray_braces(self) -> None:
-        assert parse_json_output(
-            'I think {maybe} the answer is {"sentiment": "positive"}'
-        ) == {"sentiment": "positive"}
-
-    def test_top_level_array_returns_none(self) -> None:
-        assert parse_json_output("[1, 2, 3]") is None
-
-    def test_scalar_json_returns_none(self) -> None:
-        assert parse_json_output("true") is None
-        assert parse_json_output("42") is None
-        assert parse_json_output('"hello"') is None
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            pytest.param('{"a": 1}', {"a": 1}, id="plain"),
+            pytest.param(
+                'Here you go: {"a": 1} done', {"a": 1}, id="embedded-in-prose"
+            ),
+            pytest.param(
+                '```json\n{"sentiment": "positive"}\n```',
+                {"sentiment": "positive"},
+                id="code-fence",
+            ),
+            pytest.param(
+                'prefix {"a": 1} middle {"b": 2} suffix',
+                {"a": 1},
+                id="first-of-multiple",
+            ),
+            pytest.param(
+                'I think {maybe} the answer is {"sentiment": "positive"}',
+                {"sentiment": "positive"},
+                id="recovers-after-stray-braces",
+            ),
+            pytest.param("not json at all", None, id="not-json"),
+            pytest.param("{not: valid}", None, id="malformed-braces"),
+            pytest.param("[1, 2, 3]", None, id="top-level-array"),
+            pytest.param("true", None, id="scalar-bool"),
+            pytest.param("42", None, id="scalar-int"),
+            pytest.param('"hello"', None, id="scalar-string"),
+        ],
+    )
+    def test_parse_json_output(self, raw: str, expected: dict | None) -> None:
+        assert parse_json_output(raw) == expected
 
 
 class TestResolveInput:
-    def test_pasted_wins(self) -> None:
-        assert resolve_input("typed", "uploaded", "sample") == "typed"
-
-    def test_upload_when_no_pasted(self) -> None:
-        assert resolve_input("", "uploaded", "sample") == "uploaded"
-
-    def test_sample_when_neither(self) -> None:
-        assert resolve_input("", "", "sample") == "sample"
-
-    def test_all_empty(self) -> None:
-        assert resolve_input("", "", "") == ""
-
-    def test_strips_whitespace(self) -> None:
-        assert resolve_input("  spaced  ", "", "") == "spaced"
-
-    def test_whitespace_only_pasted_falls_through(self) -> None:
-        assert resolve_input("   ", "uploaded", "sample") == "uploaded"
+    @pytest.mark.parametrize(
+        "pasted, uploaded, sample, expected",
+        [
+            pytest.param("typed", "uploaded", "sample", "typed", id="pasted-wins"),
+            pytest.param(
+                "", "uploaded", "sample", "uploaded", id="upload-when-no-pasted"
+            ),
+            pytest.param("", "", "sample", "sample", id="sample-when-neither"),
+            pytest.param("", "", "", "", id="all-empty"),
+            pytest.param("  spaced  ", "", "", "spaced", id="strips-whitespace"),
+            pytest.param(
+                "   ",
+                "uploaded",
+                "sample",
+                "uploaded",
+                id="whitespace-only-falls-through",
+            ),
+        ],
+    )
+    def test_resolve_input(
+        self, pasted: str, uploaded: str, sample: str, expected: str
+    ) -> None:
+        assert resolve_input(pasted, uploaded, sample) == expected
 
 
 class TestTruncateToTokens:
-    def test_short_text_unchanged(self) -> None:
+    @pytest.mark.parametrize(
+        "num_tokens, expected_truncated",
+        [
+            pytest.param(10, False, id="short"),
+            pytest.param(MAX_INPUT_TOKENS, False, id="boundary-equal"),
+            pytest.param(MAX_INPUT_TOKENS + 50, True, id="over-budget"),
+        ],
+    )
+    def test_truncation_decision(
+        self, num_tokens: int, expected_truncated: bool
+    ) -> None:
         tokenizer = MagicMock()
-        tokenizer.encode.return_value = list(range(10))
+        tokenizer.encode.return_value = list(range(num_tokens))
+        tokenizer.decode.return_value = "truncated text"
 
-        text, truncated = truncate_to_tokens("hello", tokenizer)
+        text, truncated = truncate_to_tokens("original", tokenizer)
 
-        assert text == "hello"
-        assert truncated is False
-        tokenizer.decode.assert_not_called()
+        assert truncated is expected_truncated
+        if expected_truncated:
+            assert text == "truncated text"
+        else:
+            assert text == "original"
+            tokenizer.decode.assert_not_called()
 
-    def test_long_text_truncated(self) -> None:
+    def test_truncates_to_exact_budget(self) -> None:
         tokenizer = MagicMock()
         tokenizer.encode.return_value = list(range(MAX_INPUT_TOKENS + 50))
         tokenizer.decode.return_value = "truncated text"
 
-        text, truncated = truncate_to_tokens("long", tokenizer)
+        truncate_to_tokens("long", tokenizer)
 
-        assert truncated is True
-        assert text == "truncated text"
         tokenizer.decode.assert_called_once_with(
             list(range(MAX_INPUT_TOKENS)), skip_special_tokens=True
         )
-
-    def test_boundary_not_truncated(self) -> None:
-        tokenizer = MagicMock()
-        tokenizer.encode.return_value = list(range(MAX_INPUT_TOKENS))
-
-        _, truncated = truncate_to_tokens("boundary", tokenizer)
-
-        assert truncated is False
-        tokenizer.decode.assert_not_called()
 
     def test_encode_excludes_special_tokens(self) -> None:
         tokenizer = MagicMock()
@@ -168,49 +187,68 @@ class TestTruncateToTokens:
         tokenizer.encode.assert_called_once_with("hello", add_special_tokens=False)
 
 
-def _tokenizer() -> MagicMock:
-    tokenizer = MagicMock()
-    tokenizer.apply_chat_template.return_value = "PROMPT"
-    return tokenizer
+@pytest.fixture
+def tokenizer() -> MagicMock:
+    """A mock tokenizer whose chat template renders to a fixed prompt string."""
+    tok = MagicMock()
+    tok.apply_chat_template.return_value = "PROMPT"
+    return tok
 
 
 class TestRunFeature:
+    @pytest.mark.parametrize(
+        "feature, generated, expected_raw, expected_parsed",
+        [
+            pytest.param(
+                FEATURES[0],
+                "  A concise summary.  ",
+                "A concise summary.",
+                None,
+                id="prose-stripped-and-unparsed",
+            ),
+            pytest.param(
+                FEATURES[3],
+                '{"sentiment": "positive", "confidence": 0.9}',
+                '{"sentiment": "positive", "confidence": 0.9}',
+                {"sentiment": "positive", "confidence": 0.9},
+                id="json-parsed",
+            ),
+            pytest.param(
+                FEATURES[1],
+                "totally not json",
+                "totally not json",
+                None,
+                id="json-unparseable",
+            ),
+        ],
+    )
     @patch("streamlit_app.generate")
-    def test_prose_feature_returns_raw_unparsed(self, mock_generate: MagicMock) -> None:
-        mock_generate.return_value = "  A concise summary.  "
-
-        result = run_feature(FEATURES[0], "text", MagicMock(), _tokenizer())
-
-        assert result["raw"] == "A concise summary."
-        assert result["parsed"] is None
-
-    @patch("streamlit_app.generate")
-    def test_json_feature_parses_output(self, mock_generate: MagicMock) -> None:
-        mock_generate.return_value = '{"sentiment": "positive", "confidence": 0.9}'
-
-        result = run_feature(FEATURES[3], "text", MagicMock(), _tokenizer())
-
-        assert result["parsed"] == {"sentiment": "positive", "confidence": 0.9}
-
-    @patch("streamlit_app.generate")
-    def test_json_feature_unparseable_returns_none(
-        self, mock_generate: MagicMock
+    def test_raw_and_parsed(
+        self,
+        mock_generate: MagicMock,
+        feature: dict,
+        generated: str,
+        expected_raw: str,
+        expected_parsed: dict | None,
+        tokenizer: MagicMock,
     ) -> None:
-        mock_generate.return_value = "totally not json"
+        mock_generate.return_value = generated
 
-        result = run_feature(FEATURES[1], "text", MagicMock(), _tokenizer())
+        result = run_feature(feature, "text", MagicMock(), tokenizer)
 
-        assert result["parsed"] is None
-        assert result["raw"] == "totally not json"
+        assert result["raw"] == expected_raw
+        assert result["parsed"] == expected_parsed
 
     @patch("streamlit_app.generate")
     def test_applies_chat_template_and_max_tokens(
-        self, mock_generate: MagicMock
+        self, mock_generate: MagicMock, tokenizer: MagicMock
     ) -> None:
         mock_generate.return_value = "{}"
-        tokenizer = _tokenizer()
 
-        run_feature(FEATURES[1], "hello world", MagicMock(), tokenizer)
+        # language="English" → no directive and the base (un-enlarged) budget.
+        run_feature(
+            FEATURES[1], "hello world", MagicMock(), tokenizer, language="English"
+        )
 
         messages = tokenizer.apply_chat_template.call_args[0][0]
         assert messages[0]["role"] == "system"
@@ -220,55 +258,81 @@ class TestRunFeature:
         assert call_kwargs["prompt"] == "PROMPT"
         assert call_kwargs["max_tokens"] == FEATURES[1]["max_tokens"]
 
-    @patch("streamlit_app.make_logits_processors")
-    @patch("streamlit_app.make_sampler")
     @patch("streamlit_app.generate")
-    def test_prose_uses_greedy_sampler_and_repetition_penalty(
-        self,
-        mock_generate: MagicMock,
-        mock_make_sampler: MagicMock,
-        mock_make_logits: MagicMock,
-    ) -> None:
-        mock_generate.return_value = "summary"
-        mock_make_sampler.return_value = "SAMPLER"
-        mock_make_logits.return_value = "PROCS"
-
-        run_feature(FEATURES[0], "text", MagicMock(), _tokenizer())
-
-        mock_make_sampler.assert_called_once_with(temp=0.0, top_p=1.0)
-        mock_make_logits.assert_called_once_with(repetition_penalty=1.2)
-        call_kwargs = mock_generate.call_args[1]
-        assert call_kwargs["sampler"] == "SAMPLER"
-        assert call_kwargs["logits_processors"] == "PROCS"
-
-    @patch("streamlit_app.make_logits_processors")
-    @patch("streamlit_app.make_sampler")
-    @patch("streamlit_app.generate")
-    def test_json_feature_skips_repetition_penalty(
-        self,
-        mock_generate: MagicMock,
-        mock_make_sampler: MagicMock,
-        mock_make_logits: MagicMock,
+    def test_language_directive_appended_to_user_turn(
+        self, mock_generate: MagicMock, tokenizer: MagicMock
     ) -> None:
         mock_generate.return_value = "{}"
 
-        run_feature(FEATURES[3], "text", MagicMock(), _tokenizer())
+        run_feature(FEATURES[3], "hello", MagicMock(), tokenizer, language="German")
+
+        messages = tokenizer.apply_chat_template.call_args[0][0]
+        # Directive lands on the user turn; the system prompt stays verbatim.
+        assert "hello" in messages[1]["content"]
+        assert "German" in messages[1]["content"]
+        assert messages[0]["content"] == FEATURES[3]["system"]
+
+    @patch("streamlit_app.generate")
+    def test_english_leaves_user_turn_unchanged(
+        self, mock_generate: MagicMock, tokenizer: MagicMock
+    ) -> None:
+        mock_generate.return_value = "summary"
+
+        run_feature(FEATURES[0], "hello", MagicMock(), tokenizer, language="English")
+
+        messages = tokenizer.apply_chat_template.call_args[0][0]
+        assert messages[1]["content"] == FEATURES[0]["user_template"].format(
+            text="hello"
+        )
+
+    @pytest.mark.parametrize(
+        "feature, expects_penalty",
+        [
+            pytest.param(FEATURES[0], True, id="prose-applies-penalty"),
+            pytest.param(FEATURES[3], False, id="json-skips-penalty"),
+        ],
+    )
+    @patch("streamlit_app.make_logits_processors")
+    @patch("streamlit_app.make_sampler")
+    @patch("streamlit_app.generate")
+    def test_decoding_params(
+        self,
+        mock_generate: MagicMock,
+        mock_make_sampler: MagicMock,
+        mock_make_logits: MagicMock,
+        feature: dict,
+        expects_penalty: bool,
+        tokenizer: MagicMock,
+    ) -> None:
+        mock_generate.return_value = "{}"
+        mock_make_sampler.return_value = "SAMPLER"
+        mock_make_logits.return_value = "PROCS"
+
+        run_feature(feature, "text", MagicMock(), tokenizer)
 
         mock_make_sampler.assert_called_once_with(temp=0.0, top_p=1.0)
-        mock_make_logits.assert_not_called()
-        assert mock_generate.call_args[1]["logits_processors"] is None
+        assert mock_generate.call_args[1]["sampler"] == "SAMPLER"
+        if expects_penalty:
+            mock_make_logits.assert_called_once_with(repetition_penalty=1.2)
+            assert mock_generate.call_args[1]["logits_processors"] == "PROCS"
+        else:
+            mock_make_logits.assert_not_called()
+            assert mock_generate.call_args[1]["logits_processors"] is None
 
 
 class TestRenderResult:
+    @pytest.mark.parametrize(
+        "key, parsed",
+        [
+            pytest.param("intents", {"intent": ["a", "b"]}, id="intent-list"),
+            pytest.param("sentiment", {"sentiment": {"x": 1}}, id="sentiment-dict"),
+        ],
+    )
     @patch("streamlit_app.st")
-    def test_intent_value_coerced_to_string(self, mock_st: MagicMock) -> None:
-        render_result("intents", {"raw": "x", "parsed": {"intent": ["a", "b"]}})
-        _, value = mock_st.metric.call_args[0]
-        assert isinstance(value, str)
-
-    @patch("streamlit_app.st")
-    def test_sentiment_value_coerced_to_string(self, mock_st: MagicMock) -> None:
-        render_result("sentiment", {"raw": "x", "parsed": {"sentiment": {"x": 1}}})
+    def test_metric_value_coerced_to_string(
+        self, mock_st: MagicMock, key: str, parsed: dict
+    ) -> None:
+        render_result(key, {"raw": "x", "parsed": parsed})
         _, value = mock_st.metric.call_args[0]
         assert isinstance(value, str)
 
@@ -285,3 +349,79 @@ class TestRenderResult:
         )
         captions = [call.args[0] for call in mock_st.caption.call_args_list]
         assert any("90%" in str(text) for text in captions)
+
+
+class TestLanguageDirective:
+    def test_english_is_empty_for_all_features(self) -> None:
+        # Prompts are already English, so no directive is added.
+        for feature in FEATURES:
+            assert language_directive(feature, LANGUAGE_ENGLISH) == ""
+
+    def test_prose_targets_the_language(self) -> None:
+        directive = language_directive(FEATURES[0], "German")  # summary = prose
+        assert "German" in directive
+        assert "entire response" in directive
+
+    def test_json_localizes_values_but_keeps_keys_english(self) -> None:
+        directive = language_directive(FEATURES[3], "German")  # sentiment = json
+        assert "German" in directive  # free-text values localized
+        assert "English" in directive  # keys/enums stay English
+        assert "key" in directive.lower()
+
+    def test_match_input_uses_relative_phrase(self) -> None:
+        directive = language_directive(FEATURES[0], LANGUAGE_AUTO)
+        assert "same language as the text" in directive
+        assert LANGUAGE_AUTO not in directive  # not the literal "Match input" label
+
+
+class TestResolveMaxInputTokens:
+    def test_default_when_unset(self) -> None:
+        with patch.dict(os.environ):
+            os.environ.pop("MAX_INPUT_TOKENS", None)
+            assert _resolve_max_input_tokens() == _DEFAULT_MAX_INPUT_TOKENS
+
+    def test_reads_env_value(self) -> None:
+        with patch.dict(os.environ, {"MAX_INPUT_TOKENS": "4096"}):
+            assert _resolve_max_input_tokens() == 4096
+
+    def test_clamps_to_model_max(self) -> None:
+        with patch.dict(os.environ, {"MAX_INPUT_TOKENS": "999999"}):
+            assert _resolve_max_input_tokens() == MODEL_MAX_TOKENS
+
+    def test_non_integer_falls_back_to_default(self) -> None:
+        with patch.dict(os.environ, {"MAX_INPUT_TOKENS": "lots"}):
+            assert _resolve_max_input_tokens() == _DEFAULT_MAX_INPUT_TOKENS
+
+    def test_non_positive_falls_back_to_default(self) -> None:
+        # A sign typo or 0 must NOT silently clamp to a 1-token cap.
+        for bad in ("0", "-1", "-16384"):
+            with patch.dict(os.environ, {"MAX_INPUT_TOKENS": bad}):
+                assert _resolve_max_input_tokens() == _DEFAULT_MAX_INPUT_TOKENS
+
+    def test_default_and_ceiling_pinned(self) -> None:
+        # Deliberate choices: 16K is the memory-safe bf16 default on a 32 GB Mac;
+        # 131072 is Granite 4.1's 128K ceiling. Pinned so neither drifts silently.
+        assert _DEFAULT_MAX_INPUT_TOKENS == 16384
+        assert MODEL_MAX_TOKENS == 131072
+        # The default must itself sit inside the clamp range.
+        assert 1 <= _DEFAULT_MAX_INPUT_TOKENS <= MODEL_MAX_TOKENS
+
+
+class TestEffectiveMaxTokens:
+    def test_english_uses_base_budget(self) -> None:
+        feature = FEATURES[3]  # sentiment
+        assert _effective_max_tokens(feature, "English") == feature["max_tokens"]
+
+    def test_latin_language_uses_base_budget(self) -> None:
+        feature = FEATURES[3]
+        assert _effective_max_tokens(feature, "German") == feature["max_tokens"]
+
+    def test_token_heavy_language_enlarges_budget(self) -> None:
+        feature = FEATURES[3]
+        assert _effective_max_tokens(feature, "Japanese") == feature["max_tokens"] * 2
+
+    def test_match_input_enlarges_budget(self) -> None:
+        feature = FEATURES[0]  # summary
+        assert (
+            _effective_max_tokens(feature, LANGUAGE_AUTO) == feature["max_tokens"] * 2
+        )
