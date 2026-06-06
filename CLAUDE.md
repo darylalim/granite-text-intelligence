@@ -60,7 +60,7 @@ model, tokenizer = load("mlx-community/granite-4.1-8b-bf16")
 - `MODEL_NAME` — `mlx-community/granite-4.1-8b-bf16`.
 - `MODEL_MAX_TOKENS = 131072` — Granite 4.1's 128K context ceiling; configured caps are clamped to it.
 - `MAX_INPUT_TOKENS` — input-token budget; inputs longer than this are truncated (with a warning) before analysis. Defaults to `16384`, overridable via the `MAX_INPUT_TOKENS` env var (see Environment), resolved by `_resolve_max_input_tokens()`.
-- `TEMP = 0.0`, `TOP_P = 1.0`, `REPETITION_PENALTY = 1.2` — fixed decoding params. `temp=0.0` is greedy/deterministic, which keeps the JSON-emitting features reliably parseable. The repetition penalty is applied to **prose only** (it would fight the repeated structural tokens JSON requires).
+- `TEMP = 0.0`, `REPETITION_PENALTY = 1.2` — fixed decoding params. `temp=0.0` is greedy/deterministic (`make_sampler` returns argmax), which keeps the JSON-emitting features reliably parseable; `top_p` is left at its default since it has no effect under greedy decoding. The repetition penalty is applied to **prose only** (it would fight the repeated structural tokens JSON requires).
 - `FEATURES` — `list[dict]` registry; each entry has `key`, `label` (toggle), `tab_label` (result tab), `help` (toggle tooltip), `output` (`"prose"` or `"json"`), `max_tokens`, `system`, and `user_template` (formatted with `{text}`).
 - `LABELS` — `{key: label}` derived from `FEATURES`.
 - `SAMPLE_TEXTS` — `{name: text}` built-in samples for the Sample tab.
@@ -99,7 +99,7 @@ Interactive widgets carry stable `key=`s so `AppTest` can address them by key ra
 
 ### Generation
 
-Each feature builds `[{"role": "system", ...}, {"role": "user", ...}]`, applies the chat template with `tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)`, and passes the resulting string to `generate(...)` with `_effective_max_tokens(feature, language)` (the base budget, enlarged for token-heavy output languages), `make_sampler(temp=TEMP, top_p=TOP_P)`, and a repetition-penalty `make_logits_processors` for prose features only (`logits_processors=None` for JSON). No "thinking" mode.
+Each feature builds `[{"role": "system", ...}, {"role": "user", ...}]`, applies the chat template with `tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)`, and passes the resulting string to `generate(...)` with `_effective_max_tokens(feature, language)` (the base budget, enlarged for token-heavy output languages), `make_sampler(temp=TEMP)`, and a repetition-penalty `make_logits_processors` for prose features only (`logits_processors=None` for JSON). No "thinking" mode.
 
 ### Performance
 

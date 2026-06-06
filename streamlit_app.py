@@ -51,7 +51,6 @@ MAX_INPUT_TOKENS = _resolve_max_input_tokens()
 # to prose only (see run_feature) — it would fight the repeated structural
 # tokens that JSON requires.
 TEMP = 0.0
-TOP_P = 1.0
 REPETITION_PENALTY = 1.2
 
 # IBM Granite's documented JSON system-prompt pattern, reproduced verbatim
@@ -308,7 +307,7 @@ def run_feature(
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-    sampler = make_sampler(temp=TEMP, top_p=TOP_P)
+    sampler = make_sampler(temp=TEMP)
     # Repetition penalty helps prose but harms JSON (it down-weights the repeated
     # braces, quotes, and keys the structured features rely on), so it is prose-only.
     logits_processors = (

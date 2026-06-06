@@ -310,7 +310,7 @@ class TestRunFeature:
 
         run_feature(feature, "text", MagicMock(), tokenizer)
 
-        mock_make_sampler.assert_called_once_with(temp=0.0, top_p=1.0)
+        mock_make_sampler.assert_called_once_with(temp=0.0)
         assert mock_generate.call_args[1]["sampler"] == "SAMPLER"
         if expects_penalty:
             mock_make_logits.assert_called_once_with(repetition_penalty=1.2)
