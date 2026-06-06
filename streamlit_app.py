@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from typing import Any, cast
 
@@ -13,8 +14,37 @@ load_dotenv()  # populate HF_TOKEN from .env; deploy env vars take precedence
 
 MODEL_NAME = "mlx-community/granite-4.1-8b-bf16"
 
-# Inputs longer than this are truncated (with a warning) before analysis.
-MAX_INPUT_TOKENS = 8192
+# Granite 4.1's 128K context ceiling; configured caps are clamped to it.
+MODEL_MAX_TOKENS = 131072
+
+# Default input-token budget. Inputs longer than MAX_INPUT_TOKENS are truncated
+# (with a warning) before analysis. The KV cache costs ~160 KB/token, so raising
+# the cap raises memory and prefill latency — see CLAUDE.md. Larger Macs can opt
+# into more via the MAX_INPUT_TOKENS env var.
+_DEFAULT_MAX_INPUT_TOKENS = 16384
+
+
+def _resolve_max_input_tokens() -> int:
+    """Read MAX_INPUT_TOKENS from the environment, clamped to a safe range.
+
+    Defaults to `_DEFAULT_MAX_INPUT_TOKENS` when unset; a non-integer *or
+    non-positive* value falls back to that default (so a sign typo or `0` can't
+    silently cap input to a single token). A valid value is clamped to
+    `MODEL_MAX_TOKENS`.
+    """
+    raw = os.environ.get("MAX_INPUT_TOKENS")
+    if raw is None:
+        return _DEFAULT_MAX_INPUT_TOKENS
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_INPUT_TOKENS
+    if value < 1:
+        return _DEFAULT_MAX_INPUT_TOKENS
+    return min(value, MODEL_MAX_TOKENS)
+
+
+MAX_INPUT_TOKENS = _resolve_max_input_tokens()
 
 # Fixed decoding params. temp=0.0 is greedy/deterministic, which keeps the
 # JSON-emitting features reliably parseable. The repetition penalty is applied
