@@ -406,9 +406,12 @@ with text_tab:
         placeholder="Your text here...",
         height=200,
         label_visibility="collapsed",
+        key="paste",
     )
 with upload_tab:
-    uploaded = st.file_uploader("Upload a .txt or .md file", type=["txt", "md"])
+    uploaded = st.file_uploader(
+        "Upload a .txt or .md file", type=["txt", "md"], key="upload"
+    )
     uploaded_text = (
         uploaded.getvalue().decode("utf-8", errors="replace") if uploaded else ""
     )
@@ -421,7 +424,7 @@ with upload_tab:
             label_visibility="collapsed",
         )
 with sample_tab:
-    choice = st.selectbox("Pick a sample", ["—", *SAMPLE_TEXTS])
+    choice = st.selectbox("Pick a sample", ["—", *SAMPLE_TEXTS], key="sample_select")
     sample_text = SAMPLE_TEXTS.get(choice, "")
     if sample_text:
         st.text_area(
