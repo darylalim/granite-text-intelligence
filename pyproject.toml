@@ -1,7 +1,7 @@
 [project]
 name = "granite-pipeline"
 version = "0.1.0"
-description = "Analyze text using summarization, topic detection, intent recognition, and sentiment analysis with the IBM Granite 4.1 model on Apple Silicon with MLX."
+description = "Analyze text — summarization, topic detection, intent recognition, and sentiment, in a selectable output language — using the IBM Granite 4.1 model on Apple Silicon with MLX."
 requires-python = ">=3.12"
 dependencies = [
     "mlx-lm>=0.31,<0.32",

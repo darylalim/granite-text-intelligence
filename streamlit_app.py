@@ -162,6 +162,36 @@ SAMPLE_TEXTS: dict[str, str] = {
     ),
 }
 
+# Granite 4.1's officially supported languages. Output can be localized to any of
+# them, or "Match input" to mirror the analyzed text's language. Only free-text
+# *values* are localized — JSON keys and enums stay English so parse_json_output
+# and render_result keep working (see language_directive).
+LANGUAGE_AUTO = "Match input"
+LANGUAGE_ENGLISH = "English"
+LANGUAGES: list[str] = [
+    LANGUAGE_AUTO,
+    LANGUAGE_ENGLISH,
+    "German",
+    "Spanish",
+    "French",
+    "Japanese",
+    "Portuguese",
+    "Arabic",
+    "Czech",
+    "Italian",
+    "Korean",
+    "Dutch",
+    "Chinese",
+]
+
+# Languages whose output costs materially more tokens than the English-tuned
+# `max_tokens` budgets, so structured output risks truncating mid-JSON. These
+# (and "Match input", which can target any of them) get an enlarged budget — see
+# `_effective_max_tokens`. max_tokens is a ceiling, so the extra headroom is free
+# for short outputs (generation still stops at EOS).
+_TOKEN_HEAVY_LANGUAGES = {"Japanese", "Chinese", "Korean", "Arabic"}
+_LOCALIZED_TOKEN_MULTIPLIER = 2
+
 
 st.set_page_config(page_title="Granite Pipeline")
 
@@ -220,16 +250,60 @@ def resolve_input(pasted: str, uploaded: str, sample: str) -> str:
     return pasted.strip() or uploaded.strip() or sample.strip()
 
 
+def language_directive(feature: dict[str, Any], language: str) -> str:
+    """Return a clause instructing the model which language to answer in.
+
+    Localizes only free-text *values* (summary prose, rationale, topic labels).
+    JSON keys and enumerated values (e.g. the sentiment label) must stay English
+    so parse_json_output and render_result — which read results by English key —
+    keep working. Returns "" for English (the prompts are already English).
+    """
+    if language == LANGUAGE_ENGLISH:
+        return ""
+    target = (
+        "the same language as the text above" if language == LANGUAGE_AUTO else language
+    )
+    if feature["output"] == "prose":
+        return f"\n\nWrite your entire response in {target}."
+    return (
+        f"\n\nWrite all free-text field values (such as rationale and topic "
+        f"labels) in {target}, but keep every JSON key and any enumerated value "
+        f"(such as the sentiment label) in English."
+    )
+
+
+def _effective_max_tokens(feature: dict[str, Any], language: str) -> int:
+    """Output-token budget for a feature, enlarged for token-heavy languages.
+
+    CJK/Arabic output costs more tokens than the English-tuned `max_tokens`, so a
+    localized rationale/labels can truncate mid-JSON. Those languages — and
+    "Match input", which can target any of them — get a larger ceiling; since
+    generation stops at EOS, the headroom is free for short (e.g. English) output.
+    """
+    base = feature["max_tokens"]
+    if language in _TOKEN_HEAVY_LANGUAGES or language == LANGUAGE_AUTO:
+        return base * _LOCALIZED_TOKEN_MULTIPLIER
+    return base
+
+
 def run_feature(
     feature: dict[str, Any],
     text: str,
     model: nn.Module,
     tokenizer: TokenizerWrapper,
+    language: str = LANGUAGE_AUTO,
 ) -> dict[str, Any]:
-    """Run one feature's prompt and return {"raw": str, "parsed": dict | None}."""
+    """Run one feature's prompt and return {"raw": str, "parsed": dict | None}.
+
+    The language_directive is appended to the user turn (the system prompt stays
+    verbatim, preserving IBM's documented JSON pattern).
+    """
+    user = feature["user_template"].format(text=text) + language_directive(
+        feature, language
+    )
     messages = [
         {"role": "system", "content": feature["system"]},
-        {"role": "user", "content": feature["user_template"].format(text=text)},
+        {"role": "user", "content": user},
     ]
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
@@ -246,7 +320,7 @@ def run_feature(
         model,
         tokenizer,
         prompt=prompt,
-        max_tokens=feature["max_tokens"],
+        max_tokens=_effective_max_tokens(feature, language),
         sampler=sampler,
         logits_processors=logits_processors,
         verbose=False,
@@ -307,6 +381,18 @@ def render_result(key: str, result: dict[str, Any]) -> None:
             st.write(str(parsed["rationale"]))
 
 
+def _run_signature(
+    input_text: str, enabled: dict[str, bool], language: str
+) -> tuple[str, tuple[bool, ...], str]:
+    """Identity of a run: the results panel flags them stale when this changes.
+
+    Built once on Run and recomputed live each rerun; comparing the two is how
+    the "inputs changed" note is driven. Kept in one place so the build- and
+    compare-side never drift.
+    """
+    return (input_text, tuple(enabled[f["key"]] for f in FEATURES), language)
+
+
 st.title("Granite Pipeline")
 st.caption(
     "Get summarization, topics, intents, and sentiment based on your text input."
@@ -348,17 +434,30 @@ with sample_tab:
 
 input_text = resolve_input(pasted, uploaded_text, sample_text)
 
+# Output language is global (applies to every feature), so it sits with the input
+# rather than in the per-feature column; constrained to a third of the width.
+language_col, _ = st.columns([1, 2])
+language = language_col.selectbox("Output language", LANGUAGES, key="language")
+
 # ---- Features (left) and Results (right) ----
 features_column, results_column = st.columns(2)
 
 with features_column:
     st.subheader("Features")
     enabled: dict[str, bool] = {
-        feature["key"]: st.toggle(feature["label"], value=True, help=feature["help"])
+        feature["key"]: st.toggle(
+            feature["label"],
+            value=True,
+            help=feature["help"],
+            key=f"feature_{feature['key']}",
+        )
         for feature in FEATURES
     }
     run = st.button(
-        "Run", type="primary", disabled=not (input_text and any(enabled.values()))
+        "Run",
+        type="primary",
+        disabled=not (input_text and any(enabled.values())),
+        key="run",
     )
 
 with results_column:
@@ -372,12 +471,14 @@ with results_column:
                 if not enabled[feature["key"]]:
                     continue
                 with st.spinner(f"Running {feature['label']}…"):
-                    data[feature["key"]] = run_feature(feature, text, model, tokenizer)
+                    data[feature["key"]] = run_feature(
+                        feature, text, model, tokenizer, language
+                    )
             st.session_state.results = {
                 "order": [f["key"] for f in FEATURES if enabled[f["key"]]],
                 "data": data,
                 "truncated": was_truncated,
-                "signature": (input_text, tuple(enabled[f["key"]] for f in FEATURES)),
+                "signature": _run_signature(input_text, enabled, language),
             }
         except Exception as exc:
             st.exception(exc)
@@ -386,7 +487,7 @@ with results_column:
     if results is not None:
         if results["truncated"]:
             st.warning(f"Input was truncated to the first {MAX_INPUT_TOKENS} tokens.")
-        current_signature = (input_text, tuple(enabled[f["key"]] for f in FEATURES))
+        current_signature = _run_signature(input_text, enabled, language)
         if results["signature"] != current_signature:
             st.info("Inputs changed since this run — click Run to refresh.")
 
