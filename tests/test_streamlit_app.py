@@ -5,13 +5,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from streamlit_app import (
+    _DEFAULT_MAX_INPUT_TOKENS,
     FEATURES,
     LABELS,
     LANGUAGE_AUTO,
     LANGUAGE_ENGLISH,
     MAX_INPUT_TOKENS,
     MODEL_MAX_TOKENS,
-    _DEFAULT_MAX_INPUT_TOKENS,
     _effective_max_tokens,
     _resolve_max_input_tokens,
     language_directive,
