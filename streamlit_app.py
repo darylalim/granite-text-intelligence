@@ -192,7 +192,7 @@ _TOKEN_HEAVY_LANGUAGES = {"Japanese", "Chinese", "Korean", "Arabic"}
 _LOCALIZED_TOKEN_MULTIPLIER = 2
 
 
-st.set_page_config(page_title="Granite Pipeline")
+st.set_page_config(page_title="Granite Text Intelligence")
 
 if "results" not in st.session_state:
     st.session_state.results = None
@@ -392,7 +392,7 @@ def _run_signature(
     return (input_text, tuple(enabled[f["key"]] for f in FEATURES), language)
 
 
-st.title("Granite Pipeline")
+st.title("Granite Text Intelligence")
 st.caption(
     "Get summarization, topics, intents, and sentiment based on your text input."
 )

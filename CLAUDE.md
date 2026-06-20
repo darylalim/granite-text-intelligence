@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Granite Pipeline** — a single-shot Streamlit playground for analyzing text with IBM's [granite-4.1-8b](https://huggingface.co/ibm-granite/granite-4.1-8b) (instruct) on Apple Silicon via `mlx-lm`. You provide text (paste, file upload, or a built-in sample), toggle which analyses to run, and get **summarization, topic detection, intent recognition, and sentiment** back. All four features are powered by prompting a single Granite model; the three classification features request JSON and are parsed defensively. Output can be localized to any of Granite's 12 supported languages (default: match the input).
+**Granite Text Intelligence** — a single-shot Streamlit playground for analyzing text with IBM's [granite-4.1-8b](https://huggingface.co/ibm-granite/granite-4.1-8b) (instruct) on Apple Silicon via `mlx-lm`. You provide text (paste, file upload, or a built-in sample), toggle which analyses to run, and get **summarization, topic detection, intent recognition, and sentiment** back. All four features are powered by prompting a single Granite model; the three classification features request JSON and are parsed defensively. Output can be localized to any of Granite's 12 supported languages (default: match the input).
 
 ## Setup
 

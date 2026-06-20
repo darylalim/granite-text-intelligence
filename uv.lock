@@ -201,7 +201,7 @@ wheels = [
 ]
 
 [[package]]
-name = "granite-pipeline"
+name = "granite-text-intelligence"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

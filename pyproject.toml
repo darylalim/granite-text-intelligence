@@ -1,5 +1,5 @@
 [project]
-name = "granite-pipeline"
+name = "granite-text-intelligence"
 version = "0.1.0"
 description = "Analyze text — summarization, topic detection, intent recognition, and sentiment, in a selectable output language — using the IBM Granite 4.1 model on Apple Silicon with MLX."
 requires-python = ">=3.12"
