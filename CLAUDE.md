@@ -34,6 +34,8 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 `pyproject.toml` — ruff lint isort (`combine-as-imports`), pytest (`pythonpath`), ty (`python-version = "3.12"`)
 
+`.python-version` — pins the project interpreter to `3.12` (via `uv python pin`), which `uv sync` / `uv run` honor automatically. Keeps the version you run and test against aligned with the `requires-python = ">=3.12"` floor and the ty type-check target, instead of letting uv auto-select the newest installed Python (e.g. 3.13).
+
 ### Environment
 
 `load_dotenv()` runs at the top of `streamlit_app.py`, before `load_model()` contacts the Hugging Face Hub.
