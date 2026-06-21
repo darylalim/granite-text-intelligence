@@ -1,0 +1,50 @@
+# IBM Carbon-inspired theme for Granite Text Intelligence.
+#
+# On-brand for the IBM Granite model: IBM Plex fonts (loaded via Google Fonts, so
+# no local font files are needed) and IBM's Blue 60 (#0f62fe) primary. Both light
+# and dark variants are defined, which is what makes the light/dark toggle appear
+# in the app's settings menu — a single [theme] block would lock one mode.
+#
+# Shared settings (fonts, radius) live in [theme]; per-mode colors override in
+# [theme.light] / [theme.dark]. See the project's developing-with-streamlit theme
+# reference for the full option list.
+
+[theme]
+primaryColor = "#0f62fe"
+baseRadius = "small"
+linkUnderline = false
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+headingFont = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&display=swap"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+
+# Carbon White
+[theme.light]
+primaryColor = "#0f62fe"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f4"
+textColor = "#161616"
+linkColor = "#0f62fe"
+borderColor = "#e0e0e0"
+codeBackgroundColor = "#f4f4f4"
+greenColor = "#24a148"
+redColor = "#da1e28"
+yellowColor = "#f1c21b"
+blueColor = "#0f62fe"
+violetColor = "#8a3ffc"
+grayColor = "#6f6f6f"
+
+# Carbon Gray 100
+[theme.dark]
+primaryColor = "#0f62fe"
+backgroundColor = "#161616"
+secondaryBackgroundColor = "#262626"
+textColor = "#f4f4f4"
+linkColor = "#78a9ff"
+borderColor = "#393939"
+codeBackgroundColor = "#262626"
+greenColor = "#42be65"
+redColor = "#fa4d56"
+yellowColor = "#f1c21b"
+blueColor = "#4589ff"
+violetColor = "#a56eff"
+grayColor = "#8d8d8d"

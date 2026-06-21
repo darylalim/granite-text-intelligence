@@ -1,5 +1,8 @@
 import json
 import os
+import tomllib
+from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,6 +41,7 @@ class TestFeatures:
                 "key",
                 "label",
                 "tab_label",
+                "icon",
                 "help",
                 "output",
                 "max_tokens",
@@ -47,6 +51,9 @@ class TestFeatures:
                 assert field in feature
             assert "{text}" in feature["user_template"]
             assert feature["output"] in ("prose", "json")
+            # Material Symbol shortcode driving the result tab (e.g. ":material/mood:").
+            assert feature["icon"].startswith(":material/")
+            assert feature["icon"].endswith(":")
 
     def test_only_summary_is_prose(self) -> None:
         assert FEATURES[0]["output"] == "prose"
@@ -425,3 +432,65 @@ class TestEffectiveMaxTokens:
         assert (
             _effective_max_tokens(feature, LANGUAGE_AUTO) == feature["max_tokens"] * 2
         )
+
+
+def _flatten_theme_keys(table: dict, prefix: str = "theme") -> Iterator[str]:
+    """Yield dotted Streamlit option keys for a parsed [theme] table, recursing
+    into the light/dark sub-tables (e.g. "theme.light.primaryColor")."""
+    for name, value in table.items():
+        key = f"{prefix}.{name}"
+        if isinstance(value, dict):
+            yield from _flatten_theme_keys(value, key)
+        else:
+            yield key
+
+
+class TestThemeConfig:
+    """The IBM Carbon-inspired theme ships in .streamlit/config.toml.
+
+    Streamlit only *warns* on a malformed theme — it never raises — so a typo or
+    a dropped section would silently disable styling without any test noticing.
+    These assertions make that failure mode visible.
+    """
+
+    CONFIG = Path(__file__).parent.parent / ".streamlit" / "config.toml"
+
+    def _theme(self) -> dict:
+        with self.CONFIG.open("rb") as handle:
+            return tomllib.load(handle)["theme"]
+
+    def test_config_exists_and_parses(self) -> None:
+        assert self.CONFIG.is_file()
+        with self.CONFIG.open("rb") as handle:
+            tomllib.load(handle)  # raises TOMLDecodeError on a syntax error
+
+    def test_defines_light_and_dark_modes(self) -> None:
+        # Both sections must exist for the in-app light/dark toggle to appear.
+        theme = self._theme()
+        assert "light" in theme
+        assert "dark" in theme
+
+    def test_uses_ibm_blue_primary(self) -> None:
+        # IBM Blue 60 — the on-brand accent the whole theme is built around.
+        theme = self._theme()
+        assert theme["light"]["primaryColor"] == "#0f62fe"
+        assert theme["dark"]["primaryColor"] == "#0f62fe"
+
+    def test_loads_ibm_plex_fonts(self) -> None:
+        theme = self._theme()
+        assert "IBM Plex Sans" in theme["font"]
+        assert "IBM Plex Mono" in theme["codeFont"]
+
+    def test_only_recognized_theme_keys(self) -> None:
+        # Streamlit silently ignores unrecognized theme keys (it warns, never
+        # raises), so a mis-cased key like `backgroundcolor` would disable that
+        # style with no error and no failing test. Cross-check every key — incl.
+        # the light/dark sub-tables — against Streamlit's own option registry so a
+        # typo or future drift fails loudly here instead of going unnoticed.
+        import streamlit.config
+
+        recognized = set(streamlit.config.get_config_options())
+        unknown = [
+            key for key in _flatten_theme_keys(self._theme()) if key not in recognized
+        ]
+        assert not unknown, f"unrecognized theme keys: {unknown}"

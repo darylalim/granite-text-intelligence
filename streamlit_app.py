@@ -69,6 +69,7 @@ FEATURES: list[dict[str, Any]] = [
         "key": "summary",
         "label": "Summarization",
         "tab_label": "Summary",
+        "icon": ":material/summarize:",
         "help": "Generates a faithful, self-contained summary of your text.",
         "output": "prose",
         "max_tokens": 256,
@@ -84,6 +85,7 @@ FEATURES: list[dict[str, Any]] = [
         "key": "topics",
         "label": "Topic Detection",
         "tab_label": "Topics",
+        "icon": ":material/label:",
         "help": "Identifies and ranks the main topics in your text.",
         "output": "json",
         "max_tokens": 256,
@@ -104,6 +106,7 @@ FEATURES: list[dict[str, Any]] = [
         "key": "intents",
         "label": "Intent Recognition",
         "tab_label": "Intents",
+        "icon": ":material/flag:",
         "help": "Determines the primary intent expressed in your text.",
         "output": "json",
         "max_tokens": 256,
@@ -123,6 +126,7 @@ FEATURES: list[dict[str, Any]] = [
         "key": "sentiment",
         "label": "Sentiment",
         "tab_label": "Sentiment",
+        "icon": ":material/mood:",
         "help": "Classifies overall sentiment as positive, negative, neutral, or mixed.",
         "output": "json",
         "max_tokens": 128,
@@ -192,10 +196,12 @@ _TOKEN_HEAVY_LANGUAGES = {"Japanese", "Chinese", "Korean", "Arabic"}
 _LOCALIZED_TOKEN_MULTIPLIER = 2
 
 
-st.set_page_config(page_title="Granite Text Intelligence")
+st.set_page_config(
+    page_title="Granite Text Intelligence",
+    page_icon=":material/psychology:",
+)
 
-if "results" not in st.session_state:
-    st.session_state.results = None
+st.session_state.setdefault("results", None)
 
 
 @st.cache_resource
@@ -398,7 +404,13 @@ st.caption(
 )
 
 # ---- Input: Text > Upload > Sample (first non-empty wins) ----
-text_tab, upload_tab, sample_tab = st.tabs(["Text", "Upload", "Sample"])
+text_tab, upload_tab, sample_tab = st.tabs(
+    [
+        ":material/edit: Text",
+        ":material/upload_file: Upload",
+        ":material/dataset: Sample",
+    ]
+)
 with text_tab:
     pasted = st.text_area(
         "Text",
@@ -458,6 +470,8 @@ with features_column:
     run = st.button(
         "Run",
         type="primary",
+        icon=":material/play_arrow:",
+        width="stretch",
         disabled=not (input_text and any(enabled.values())),
         key="run",
     )
@@ -488,12 +502,23 @@ with results_column:
     results = cast("dict[str, Any] | None", st.session_state.results)
     if results is not None:
         if results["truncated"]:
-            st.warning(f"Input was truncated to the first {MAX_INPUT_TOKENS} tokens.")
+            st.warning(
+                f"Input was truncated to the first {MAX_INPUT_TOKENS} tokens.",
+                icon=":material/content_cut:",
+            )
         current_signature = _run_signature(input_text, enabled, language)
         if results["signature"] != current_signature:
-            st.info("Inputs changed since this run — click Run to refresh.")
+            st.info(
+                "Inputs changed since this run — click Run to refresh.",
+                icon=":material/sync:",
+            )
 
-    tabs = st.tabs(["JSON", *[feature["tab_label"] for feature in FEATURES]])
+    tabs = st.tabs(
+        [
+            ":material/data_object: JSON",
+            *[f"{feature['icon']} {feature['tab_label']}" for feature in FEATURES],
+        ]
+    )
     json_tab = tabs[0]
     feature_tabs = {feature["key"]: tab for feature, tab in zip(FEATURES, tabs[1:])}
 
@@ -509,7 +534,10 @@ with results_column:
                 }
             )
         else:
-            st.info("Choose features and click Run to see results here.")
+            st.info(
+                "Choose features and click Run to see results here.",
+                icon=":material/play_circle:",
+            )
 
     for key, tab in feature_tabs.items():
         with tab:
@@ -520,6 +548,6 @@ with results_column:
                     st.warning("Could not render this result.")
                     st.exception(exc)
             elif results is None:
-                st.info("Run to see results here.")
+                st.info("Run to see results here.", icon=":material/play_circle:")
             else:
                 st.caption(f"{LABELS[key]} was not enabled for this run.")

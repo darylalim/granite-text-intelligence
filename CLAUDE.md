@@ -36,6 +36,8 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 `.python-version` — pins the project interpreter to `3.12` (via `uv python pin`), which `uv sync` / `uv run` honor automatically. Keeps the version you run and test against aligned with the `requires-python = ">=3.12"` floor and the ty type-check target, instead of letting uv auto-select the newest installed Python (e.g. 3.13).
 
+`.streamlit/config.toml` — an IBM Carbon–inspired theme: IBM Plex Sans/Mono (loaded from Google Fonts, so no local font files) over IBM's Blue 60 (`#0f62fe`) primary. Shared font/radius live in `[theme]`; per-mode colors in separate `[theme.light]` / `[theme.dark]` blocks — defining **both** is what surfaces the light/dark toggle in the app's settings menu (a lone `[theme]` locks one mode). Streamlit only *warns* on an unrecognized theme key (a casing typo silently disables that style), so `TestThemeConfig` cross-checks every key against `streamlit.config.get_config_options()`.
+
 ### Environment
 
 `load_dotenv()` runs at the top of `streamlit_app.py`, before `load_model()` contacts the Hugging Face Hub.
@@ -48,7 +50,7 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 ## Architecture
 
-`streamlit_app.py` — single-file app. Single-shot flow: one input → run the selected features → show results. Default Streamlit theme, native components, no sidebar.
+`streamlit_app.py` — single-file app. Single-shot flow: one input → run the selected features → show results. An IBM Carbon–inspired theme (`.streamlit/config.toml`; see Configuration), native components, Material Symbol icons, no sidebar.
 
 ### Model
 
@@ -65,7 +67,7 @@ model, tokenizer = load("mlx-community/granite-4.1-8b-bf16")
 - `MODEL_MAX_TOKENS = 131072` — Granite 4.1's 128K context ceiling; configured caps are clamped to it.
 - `MAX_INPUT_TOKENS` — input-token budget; inputs longer than this are truncated (with a warning) before analysis. Defaults to `16384`, overridable via the `MAX_INPUT_TOKENS` env var (see Environment), resolved by `_resolve_max_input_tokens()`.
 - `TEMP = 0.0`, `REPETITION_PENALTY = 1.2` — fixed decoding params. `temp=0.0` is greedy/deterministic (`make_sampler` returns argmax), which keeps the JSON-emitting features reliably parseable; `top_p` is left at its default since it has no effect under greedy decoding. The repetition penalty is applied to **prose only** (it would fight the repeated structural tokens JSON requires).
-- `FEATURES` — `list[dict]` registry; each entry has `key`, `label` (toggle), `tab_label` (result tab), `help` (toggle tooltip), `output` (`"prose"` or `"json"`), `max_tokens`, `system`, and `user_template` (formatted with `{text}`).
+- `FEATURES` — `list[dict]` registry; each entry has `key`, `label` (toggle), `tab_label` (result tab), `icon` (the result tab's Material Symbol shortcode, e.g. `:material/mood:`), `help` (toggle tooltip), `output` (`"prose"` or `"json"`), `max_tokens`, `system`, and `user_template` (formatted with `{text}`).
 - `LABELS` — `{key: label}` derived from `FEATURES`.
 - `SAMPLE_TEXTS` — `{name: text}` built-in samples for the Sample tab.
 - `LANGUAGES` — Granite 4.1's 12 officially supported output languages, led by the named constants `LANGUAGE_AUTO = "Match input"` (the default) and `LANGUAGE_ENGLISH = "English"`. Drives the **Output language** selectbox. Input is multilingual regardless; this controls output language.
@@ -83,11 +85,11 @@ The four features: Summarization (prose, 256 tokens), Topic Detection and Intent
 
 A full-width input section sits on top; below it the page splits into two columns (`st.columns(2)`).
 
-- **Input** — `st.tabs(["Text", "Upload", "Sample"])`; the active input is resolved by precedence **Text > Upload > Sample** (first non-empty). Directly beneath the input (full-width, above the column split) is the **Output language** selectbox (`LANGUAGES`, default "Match input"), width-constrained to ~1/3 via `st.columns([1, 2])` — it's a global setting, so it sits with the input rather than in the per-feature column.
-- **Left column** — a "Features" subheader over the four `st.toggle` widgets (default on; each description in its `help=` tooltip), with the **Run** button beneath (disabled until there is input and at least one feature is on).
+- **Input** — `st.tabs(["Text", "Upload", "Sample"])` (each label prefixed with a Material Symbol icon); the active input is resolved by precedence **Text > Upload > Sample** (first non-empty). Directly beneath the input (full-width, above the column split) is the **Output language** selectbox (`LANGUAGES`, default "Match input"), width-constrained to ~1/3 via `st.columns([1, 2])` — it's a global setting, so it sits with the input rather than in the per-feature column.
+- **Left column** — a "Features" subheader over the four `st.toggle` widgets (default on; each description in its `help=` tooltip), with the full-width **Run** button beneath (a `:material/play_arrow:` icon; `width="stretch"`; disabled until there is input and at least one feature is on).
 
 Interactive widgets carry stable `key=`s so `AppTest` can address them by key rather than positional index: `paste` (text area), `upload` (file uploader), `sample_select` (sample selectbox), `feature_<key>` (per-feature toggles, e.g. `feature_summary`), `language` (output-language selectbox), and `run` (the Run button).
-- **Right column** — fixed result tabs: `JSON` plus one tab per feature, derived from `FEATURES` (`tab_label`). JSON shows the combined output; each feature tab renders its result (guarded by try/except), a "not enabled for this run" note if it was off, or a run prompt before the first run. An "inputs changed — click Run to refresh" note appears when the live input/toggles/language differ from the run. Rendered from `st.session_state.results`.
+- **Right column** — fixed result tabs: `JSON` plus one tab per feature, derived from `FEATURES` (each feature label composed as `icon` + `tab_label`; the `JSON` tab carries an icon too). JSON shows the combined output; each feature tab renders its result (guarded by try/except), a "not enabled for this run" note if it was off, or a run prompt before the first run. An "inputs changed — click Run to refresh" note appears when the live input/toggles/language differ from the run. Rendered from `st.session_state.results`.
 
 ### Functions
 
@@ -111,6 +113,7 @@ Each feature builds `[{"role": "system", ...}, {"role": "user", ...}]`, applies 
 - MLX handles Apple Silicon (M-series) acceleration natively.
 - Inputs over `MAX_INPUT_TOKENS` (default 16384, env-configurable) are truncated before analysis.
 - Fixed greedy decoding (`temp=0.0`) keeps classification output deterministic and parseable.
+- No `@st.fragment`: the one expensive op (inference) is already gated behind Run and `@st.cache_resource`-cached, so isolating reruns would add complexity for no gain — and a results-panel fragment would not even see the input/toggle/language widgets it depends on (they live outside it), breaking the cross-widget staleness note. `st.session_state.results` is initialized with `st.session_state.setdefault`.
 
 ### Error Handling
 
@@ -120,7 +123,7 @@ Unexpected exceptions during a run — and during per-feature rendering — are 
 
 `tests/test_streamlit_app.py` — unit tests (mocked, no model download). Data-driven cases use `@pytest.mark.parametrize` (each `pytest.param` carries an `id=` so failures are self-labeling); `TestRunFeature` shares a `tokenizer` fixture:
 
-- `TestFeatures` — `FEATURES` order, required fields, prose-vs-JSON outputs, `LABELS` mapping, valid embedded JSON schemas, and the IBM-documented JSON system-prompt pattern (incl. the trailing newline)
+- `TestFeatures` — `FEATURES` order, required fields (incl. each feature's `:material/…:` `icon`), prose-vs-JSON outputs, `LABELS` mapping, valid embedded JSON schemas, and the IBM-documented JSON system-prompt pattern (incl. the trailing newline)
 - `TestParseJsonOutput` — plain / embedded / code-fenced JSON, first-of-multiple objects, recovery after stray braces, non-object JSON (arrays, scalars) → `None`, unparseable → `None`
 - `TestResolveInput` — input precedence, whitespace stripping (incl. whitespace-only falling through to the next source), all-empty
 - `TestTruncateToTokens` — short / long / boundary cases (uses `MAX_INPUT_TOKENS`), and the `add_special_tokens=False` encode flag
@@ -129,6 +132,7 @@ Unexpected exceptions during a run — and during per-feature rendering — are 
 - `TestResolveMaxInputTokens` — env-var override, default when unset, non-integer/non-positive fallback, clamp to `MODEL_MAX_TOKENS`, and the pinned default/ceiling values
 - `TestEffectiveMaxTokens` — base budget for English/Latin languages; doubled for token-heavy scripts and "Match input"
 - `TestRenderResult` — `st.metric` string coercion for intent/sentiment, the non-list topics guard, and percent-formatted confidence (mocks `streamlit_app.st`)
+- `TestThemeConfig` — `.streamlit/config.toml` parses, defines both light & dark modes, uses the IBM Blue primary and IBM Plex fonts, and contains **only** keys Streamlit recognizes (`_flatten_theme_keys` + `streamlit.config.get_config_options()`) so a silent casing typo fails the suite
 
 `tests/test_app_ui.py` — integration tests via Streamlit's `AppTest` (`streamlit.testing.v1`), driving the imperative UI block headlessly. The Run path is mocked at the **`mlx_lm` boundary** (`patch("mlx_lm.load" / "mlx_lm.generate")`) — `streamlit_app` re-execs `from mlx_lm import generate, load` on every run, so the imports bind to the mocks; an autouse fixture clears `st.cache_resource` between tests so each test's mock is used. Widgets are addressed by `key=`, not index.
 
