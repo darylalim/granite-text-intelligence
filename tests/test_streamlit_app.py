@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
@@ -357,6 +358,30 @@ class TestRenderResult:
         captions = [call.args[0] for call in mock_st.caption.call_args_list]
         assert any("90%" in str(text) for text in captions)
 
+    @pytest.mark.parametrize(
+        "sentiment, color",
+        [
+            pytest.param("positive", "green", id="positive-green"),
+            pytest.param("negative", "red", id="negative-red"),
+            pytest.param("neutral", "gray", id="neutral-gray"),
+            pytest.param("mixed", "orange", id="mixed-orange"),
+        ],
+    )
+    @patch("streamlit_app.st")
+    def test_sentiment_value_colored_by_enum(
+        self, mock_st: MagicMock, sentiment: str, color: str
+    ) -> None:
+        render_result("sentiment", {"raw": "x", "parsed": {"sentiment": sentiment}})
+        _, value = mock_st.metric.call_args[0]
+        assert value == f":{color}[{sentiment}]"
+
+    @patch("streamlit_app.st")
+    def test_unknown_sentiment_renders_uncolored(self, mock_st: MagicMock) -> None:
+        # An out-of-enum label must not be wrapped in a bogus `:None[...]` color.
+        render_result("sentiment", {"raw": "x", "parsed": {"sentiment": "ecstatic"}})
+        _, value = mock_st.metric.call_args[0]
+        assert value == "ecstatic"
+
 
 class TestLanguageDirective:
     def test_english_is_empty_for_all_features(self) -> None:
@@ -434,15 +459,23 @@ class TestEffectiveMaxTokens:
         )
 
 
-def _flatten_theme_keys(table: dict, prefix: str = "theme") -> Iterator[str]:
-    """Yield dotted Streamlit option keys for a parsed [theme] table, recursing
-    into the light/dark sub-tables (e.g. "theme.light.primaryColor")."""
+def _flatten_theme_items(
+    table: dict, prefix: str = "theme"
+) -> Iterator[tuple[str, object]]:
+    """Yield (dotted option key, leaf value) pairs for a parsed [theme] table,
+    recursing into the light/dark sub-tables (e.g. ("theme.light.primaryColor",
+    "#0f62fe"))."""
     for name, value in table.items():
         key = f"{prefix}.{name}"
         if isinstance(value, dict):
-            yield from _flatten_theme_keys(value, key)
+            yield from _flatten_theme_items(value, key)
         else:
-            yield key
+            yield key, value
+
+
+def _flatten_theme_keys(table: dict, prefix: str = "theme") -> Iterator[str]:
+    """The dotted option keys of a parsed [theme] table (see _flatten_theme_items)."""
+    return (key for key, _ in _flatten_theme_items(table, prefix))
 
 
 class TestThemeConfig:
@@ -494,3 +527,18 @@ class TestThemeConfig:
             key for key in _flatten_theme_keys(self._theme()) if key not in recognized
         ]
         assert not unknown, f"unrecognized theme keys: {unknown}"
+
+    def test_color_values_are_six_digit_hex(self) -> None:
+        # Streamlit doesn't validate color *values* either — a dropped "#" or
+        # digit passes the key check yet silently disables that color, the same
+        # failure mode as a mis-cased key. Enforce this project's 6-digit-hex
+        # house style on every single-string *Color value (list-valued chart
+        # color keys, if ever added, are skipped by the str guard).
+        malformed = [
+            f"{key}={value!r}"
+            for key, value in _flatten_theme_items(self._theme())
+            if key.endswith("Color")
+            and isinstance(value, str)
+            and not re.fullmatch(r"#[0-9a-fA-F]{6}", value)
+        ]
+        assert not malformed, f"malformed hex color values: {malformed}"

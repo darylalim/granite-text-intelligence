@@ -345,6 +345,19 @@ def _render_confidence(parsed: dict[str, Any]) -> None:
         st.caption(f"Confidence: {confidence}")
 
 
+# Color the sentiment metric value by its enum, via Streamlit's `:color[…]`
+# markdown (which reads the theme's greenColor/redColor/grayColor/orangeColor).
+# The sentiment enum is fixed by the JSON schema and stays English, so this
+# mapping is stable; orange (not the low-contrast yellow) is used for "mixed".
+# Any out-of-enum label falls through to an uncolored value.
+_SENTIMENT_COLOR = {
+    "positive": "green",
+    "negative": "red",
+    "neutral": "gray",
+    "mixed": "orange",
+}
+
+
 def render_result(key: str, result: dict[str, Any]) -> None:
     """Render one feature's result using native components.
 
@@ -380,7 +393,9 @@ def render_result(key: str, result: dict[str, Any]) -> None:
         if parsed.get("rationale"):
             st.write(str(parsed["rationale"]))
     elif key == "sentiment":
-        st.metric("Sentiment", str(parsed.get("sentiment", "—")))
+        sentiment = str(parsed.get("sentiment", "—"))
+        color = _SENTIMENT_COLOR.get(sentiment.lower())
+        st.metric("Sentiment", f":{color}[{sentiment}]" if color else sentiment)
         _render_confidence(parsed)
         if parsed.get("rationale"):
             st.write(str(parsed["rationale"]))

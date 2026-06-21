@@ -121,7 +121,7 @@ class TestRunInteraction:
         assert not at.exception
         assert at.session_state["results"]["order"] == ["sentiment"]
         assert at.metric[0].label == "Sentiment"
-        assert at.metric[0].value == "positive"
+        assert at.metric[0].value == ":green[positive]"  # colored by sentiment enum
         assert any("90%" in caption.value for caption in at.caption)
 
     def test_disabled_feature_shows_not_enabled_note(
