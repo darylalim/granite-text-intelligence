@@ -6,7 +6,7 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from streamlit_app import MAX_INPUT_TOKENS
+from streamlit_app import FEATURES, MAX_INPUT_TOKENS
 
 APP = str(Path(__file__).parent.parent / "streamlit_app.py")
 
@@ -70,6 +70,33 @@ class TestInitialRender:
     def test_language_selectbox_defaults_to_match_input(self) -> None:
         at = AppTest.from_file(APP).run()
         assert at.selectbox(key="language").value == "Match input"
+
+
+class TestUIPolish:
+    """Material Symbol icons on the tabs and Run button — no model needed."""
+
+    def test_input_tabs_carry_icons(self) -> None:
+        at = AppTest.from_file(APP).run()
+        labels = {tab.label for tab in at.tabs}
+        for label in (
+            ":material/edit: Text",
+            ":material/upload_file: Upload",
+            ":material/dataset: Sample",
+        ):
+            assert label in labels
+
+    def test_result_tabs_derive_from_features_with_icons(self) -> None:
+        at = AppTest.from_file(APP).run()
+        labels = {tab.label for tab in at.tabs}
+        assert ":material/data_object: JSON" in labels
+        # Each feature's result tab label is composed as "<icon> <tab_label>", so
+        # this reads both from FEATURES and breaks if the composition regresses.
+        for feature in FEATURES:
+            assert f"{feature['icon']} {feature['tab_label']}" in labels
+
+    def test_run_button_has_play_icon(self) -> None:
+        at = AppTest.from_file(APP).run()
+        assert at.button(key="run").icon == ":material/play_arrow:"
 
 
 class TestRunInteraction:
