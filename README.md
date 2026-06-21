@@ -52,6 +52,7 @@ MAX_INPUT_TOKENS=32768
 - **Multilingual output** — return results in the input's language or any of Granite's 12 supported languages
 - **Configurable input length** — `MAX_INPUT_TOKENS` env var (default 16384) caps how much text is analyzed before truncation
 - **Tabbed results** — readable per-feature views plus a combined JSON view
+- **IBM Carbon-inspired UI** — IBM Plex fonts and an IBM Blue accent, with light/dark mode and Material Symbol icons throughout
 - **Local and private** — runs entirely on-device via MLX; no text leaves your Mac
 
 ## Development

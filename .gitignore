@@ -4,6 +4,7 @@
 !.env.example
 .pytest_cache
 .ruff_cache
+.streamlit/secrets.toml
 .venv
 .worktrees
 __pycache__

@@ -27,7 +27,7 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 ## Dependencies
 
 - `mlx-lm` (pinned `>=0.31,<0.32`) — model loading and generation on Apple Silicon; mlx and transformers are transitive deps. The `<0.32` cap guards against API drift, since decoding params pass through `generate(**kwargs)` rather than typed parameters; exact reproducibility is handled by `uv.lock`.
-- `streamlit` — web UI
+- `streamlit` (pinned `>=1.57`) — web UI. The floor is load-bearing: the IBM Carbon theme's per-mode `[theme.light]`/`[theme.dark]` blocks, `width="stretch"`, and Material Symbol icons need a recent Streamlit (older versions only *warn* on unrecognized theme keys, silently degrading the theme). Exact version pinned by `uv.lock`.
 - `python-dotenv` — loads `HF_TOKEN` (and other env vars) from `.env` for local development
 
 ## Configuration
@@ -36,7 +36,7 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 `.python-version` — pins the project interpreter to `3.12` (via `uv python pin`), which `uv sync` / `uv run` honor automatically. Keeps the version you run and test against aligned with the `requires-python = ">=3.12"` floor and the ty type-check target, instead of letting uv auto-select the newest installed Python (e.g. 3.13).
 
-`.streamlit/config.toml` — an IBM Carbon–inspired theme: IBM Plex Sans/Mono (loaded from Google Fonts, so no local font files) over IBM's Blue 60 (`#0f62fe`) primary. Shared font/radius live in `[theme]`; per-mode colors in separate `[theme.light]` / `[theme.dark]` blocks — defining **both** is what surfaces the light/dark toggle in the app's settings menu (a lone `[theme]` locks one mode). Streamlit only *warns* on an unrecognized theme key (a casing typo silently disables that style), so `TestThemeConfig` cross-checks every key against `streamlit.config.get_config_options()`.
+`.streamlit/config.toml` — an IBM Carbon-inspired theme: IBM Plex Sans/Mono (loaded from Google Fonts, so no local font files) over IBM's Blue 60 (`#0f62fe`) primary. Shared font/radius live in `[theme]`; per-mode colors in separate `[theme.light]` / `[theme.dark]` blocks — defining **both** is what surfaces the light/dark toggle in the app's settings menu (a lone `[theme]` locks one mode). Streamlit only *warns* on an unrecognized theme key (a casing typo silently disables that style), so `TestThemeConfig` cross-checks every key against `streamlit.config.get_config_options()`.
 
 ### Environment
 
@@ -50,7 +50,7 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 ## Architecture
 
-`streamlit_app.py` — single-file app. Single-shot flow: one input → run the selected features → show results. An IBM Carbon–inspired theme (`.streamlit/config.toml`; see Configuration), native components, Material Symbol icons, no sidebar.
+`streamlit_app.py` — single-file app. Single-shot flow: one input → run the selected features → show results. An IBM Carbon-inspired theme (`.streamlit/config.toml`; see Configuration), native components, Material Symbol icons, no sidebar.
 
 ### Model
 

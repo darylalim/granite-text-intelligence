@@ -241,7 +241,7 @@ dev = [
 requires-dist = [
     { name = "mlx-lm", specifier = ">=0.31,<0.32" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "streamlit" },
+    { name = "streamlit", specifier = ">=1.57" },
 ]
 
 [package.metadata.requires-dev]
