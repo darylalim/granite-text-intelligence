@@ -83,7 +83,7 @@ FEATURES: list[dict[str, Any]] = [
     },
     {
         "key": "topics",
-        "label": "Topic Detection",
+        "label": "Topic detection",
         "tab_label": "Topics",
         "icon": ":material/label:",
         "help": "Identifies and ranks the main topics in your text.",
@@ -104,7 +104,7 @@ FEATURES: list[dict[str, Any]] = [
     },
     {
         "key": "intents",
-        "label": "Intent Recognition",
+        "label": "Intent recognition",
         "tab_label": "Intents",
         "icon": ":material/flag:",
         "help": "Determines the primary intent expressed in your text.",
@@ -450,8 +450,10 @@ with upload_tab:
             label_visibility="collapsed",
         )
 with sample_tab:
-    choice = st.selectbox("Pick a sample", ["—", *SAMPLE_TEXTS], key="sample_select")
-    sample_text = SAMPLE_TEXTS.get(choice, "")
+    choice = st.segmented_control(
+        "Pick a sample", list(SAMPLE_TEXTS), key="sample_select"
+    )
+    sample_text = SAMPLE_TEXTS.get(choice or "", "")
     if sample_text:
         st.text_area(
             "Sample",

@@ -40,7 +40,7 @@ MAX_INPUT_TOKENS=32768
 
 1. Provide text via one of the **Text**, **Upload**, or **Sample** tabs (when more than one has content, precedence is Text > Upload > Sample).
 2. (Optional) Pick an **Output language** — "Match input" (default) mirrors the input's language, or choose one of Granite's 12 supported languages.
-3. Toggle the analyses you want: **Summarization**, **Topic Detection**, **Intent Recognition**, **Sentiment**.
+3. Toggle the analyses you want: **Summarization**, **Topic detection**, **Intent recognition**, **Sentiment**.
 4. Click **Run**.
 5. Read the results in the per-feature tabs, plus a combined **JSON** tab.
 
