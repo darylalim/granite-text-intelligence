@@ -143,7 +143,12 @@ class TestRunInteraction:
         assert at.button(key="run").disabled is False
         at.button(key="run").click().run()
         assert not at.exception
-        assert at.session_state["results"] is not None
+        # The picked sample is what actually fed the run — signature[0] is the
+        # resolved input_text — not merely "a run happened".
+        assert (
+            at.session_state["results"]["signature"][0]
+            == SAMPLE_TEXTS["Product review"]
+        )
 
     def test_disabled_feature_shows_not_enabled_note(
         self, patched_model: MagicMock

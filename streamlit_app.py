@@ -450,7 +450,7 @@ with sample_tab:
     choice = st.segmented_control(
         "Pick a sample", list(SAMPLE_TEXTS), key="sample_select"
     )
-    sample_text = SAMPLE_TEXTS.get(choice or "", "")
+    sample_text = SAMPLE_TEXTS.get(choice, "")
     if sample_text:
         st.text_area(
             "Sample",

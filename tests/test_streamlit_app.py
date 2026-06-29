@@ -65,13 +65,14 @@ class TestFeatures:
         assert LABELS == {feature["key"]: feature["label"] for feature in FEATURES}
 
     def test_labels_use_sentence_case(self) -> None:
-        # design.md: UI labels use sentence case, not Title Case ("Title Case
-        # Feels Shouty"). These toggle labels carry no acronyms or proper nouns,
-        # so each must equal its sentence-cased form (only the first word capped).
+        # Streamlit's design guidance ("Use sentence casing for titles and
+        # labels. Title Case Feels Shouty."). These toggle labels carry no
+        # acronyms or proper nouns, so each must equal its sentence-cased form
+        # (first character upper, the rest lower).
         for feature in FEATURES:
             label = feature["label"]
             assert label == label.capitalize(), (
-                f"toggle label {label!r} is not sentence case (design.md)"
+                f"toggle label {label!r} is not sentence case"
             )
 
     def test_json_features_embed_valid_schema(self) -> None:

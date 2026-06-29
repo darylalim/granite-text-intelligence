@@ -123,7 +123,7 @@ Unexpected exceptions during a run — and during per-feature rendering — are 
 
 `tests/test_streamlit_app.py` — unit tests (mocked, no model download). Data-driven cases use `@pytest.mark.parametrize` (each `pytest.param` carries an `id=` so failures are self-labeling); `TestRunFeature` shares a `tokenizer` fixture:
 
-- `TestFeatures` — `FEATURES` order, required fields (incl. each feature's `:material/…:` `icon`), prose-vs-JSON outputs, `LABELS` mapping, sentence-case toggle labels (design.md), valid embedded JSON schemas, and the IBM-documented JSON system-prompt pattern (incl. the trailing newline)
+- `TestFeatures` — `FEATURES` order, required fields (incl. each feature's `:material/…:` `icon`), prose-vs-JSON outputs, `LABELS` mapping, sentence-case toggle labels (Streamlit design guidance), valid embedded JSON schemas, and the IBM-documented JSON system-prompt pattern (incl. the trailing newline)
 - `TestParseJsonOutput` — plain / embedded / code-fenced JSON, first-of-multiple objects, recovery after stray braces, non-object JSON (arrays, scalars) → `None`, unparseable → `None`
 - `TestResolveInput` — input precedence, whitespace stripping (incl. whitespace-only falling through to the next source), all-empty
 - `TestTruncateToTokens` — short / long / boundary cases (uses `MAX_INPUT_TOKENS`), and the `add_special_tokens=False` encode flag
