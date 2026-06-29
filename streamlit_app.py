@@ -414,9 +414,6 @@ def _run_signature(
 
 
 st.title("Granite Text Intelligence")
-st.caption(
-    "Get summarization, topics, intents, and sentiment based on your text input."
-)
 
 # ---- Input: Text > Upload > Sample (first non-empty wins) ----
 text_tab, upload_tab, sample_tab = st.tabs(
