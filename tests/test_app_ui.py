@@ -6,7 +6,7 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from streamlit_app import FEATURES, MAX_INPUT_TOKENS
+from streamlit_app import FEATURES, MAX_INPUT_TOKENS, SAMPLE_TEXTS
 
 APP = str(Path(__file__).parent.parent / "streamlit_app.py")
 
@@ -71,6 +71,15 @@ class TestInitialRender:
         at = AppTest.from_file(APP).run()
         assert at.selectbox(key="language").value == "Match input"
 
+    def test_sample_picker_is_segmented_control(self) -> None:
+        # The sample picker is a segmented_control (all options visible, native
+        # None empty-state), not a selectbox with a "—" sentinel.
+        at = AppTest.from_file(APP).run()
+        sample = at.segmented_control(key="sample_select")
+        assert sample.value is None  # nothing selected by default
+        assert list(sample.options) == list(SAMPLE_TEXTS)
+        assert len(at.selectbox) == 1  # only the output-language dropdown remains
+
 
 class TestUIPolish:
     """Material Symbol icons on the tabs and Run button — no model needed."""
@@ -123,6 +132,18 @@ class TestRunInteraction:
         assert at.metric[0].label == "Sentiment"
         assert at.metric[0].value == ":green[positive]"  # colored by sentiment enum
         assert any("90%" in caption.value for caption in at.caption)
+
+    def test_sample_selection_feeds_the_run(self, patched_model: MagicMock) -> None:
+        # Selecting a built-in sample resolves as the input (precedence falls
+        # through to it), enabling Run and producing results.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.segmented_control(key="sample_select").set_value("Product review")
+        at.run()
+        assert at.button(key="run").disabled is False
+        at.button(key="run").click().run()
+        assert not at.exception
+        assert at.session_state["results"] is not None
 
     def test_disabled_feature_shows_not_enabled_note(
         self, patched_model: MagicMock

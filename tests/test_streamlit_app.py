@@ -10,6 +10,7 @@ import pytest
 
 from streamlit_app import (
     _DEFAULT_MAX_INPUT_TOKENS,
+    _SENTIMENT_COLOR,
     FEATURES,
     LABELS,
     LANGUAGE_AUTO,
@@ -62,6 +63,16 @@ class TestFeatures:
 
     def test_labels_match_features(self) -> None:
         assert LABELS == {feature["key"]: feature["label"] for feature in FEATURES}
+
+    def test_labels_use_sentence_case(self) -> None:
+        # design.md: UI labels use sentence case, not Title Case ("Title Case
+        # Feels Shouty"). These toggle labels carry no acronyms or proper nouns,
+        # so each must equal its sentence-cased form (only the first word capped).
+        for feature in FEATURES:
+            label = feature["label"]
+            assert label == label.capitalize(), (
+                f"toggle label {label!r} is not sentence case (design.md)"
+            )
 
     def test_json_features_embed_valid_schema(self) -> None:
         for feature in FEATURES:
@@ -542,3 +553,15 @@ class TestThemeConfig:
             and not re.fullmatch(r"#[0-9a-fA-F]{6}", value)
         ]
         assert not malformed, f"malformed hex color values: {malformed}"
+
+    def test_sentiment_colors_are_tuned_in_both_modes(self) -> None:
+        # render_result colors the sentiment metric via `:color[...]` markdown,
+        # which reads the theme's `<color>Color` keys. Every color the app emits
+        # must be tuned in BOTH modes, else that sentiment falls back to
+        # Streamlit's default hue — the orange-vs-yellow gap this guards against
+        # (the code emitted `:orange[...]` while only yellowColor was defined).
+        theme = self._theme()
+        for color in sorted(set(_SENTIMENT_COLOR.values())):
+            key = f"{color}Color"
+            assert key in theme["light"], f"{key} missing from [theme.light]"
+            assert key in theme["dark"], f"{key} missing from [theme.dark]"
