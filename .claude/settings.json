@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.env|*/.env|*/secrets.toml|*uv.lock) echo 'Blocked: edit .env via your editor; regenerate uv.lock with uv lock; secrets.toml is off-limits.' >&2; exit 2;; esac"
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.env.example|*/.env.example) ;; *.env|*/.env|*.env.*|*/secrets.toml|uv.lock|*/uv.lock) echo 'Blocked: edit .env/.env.* via your editor; regenerate uv.lock with uv lock; secrets.toml is off-limits. (Guards Edit/Write/MultiEdit only, not Bash — this is an accident guardrail, not a security boundary.)' >&2; exit 2;; esac"
           }
         ]
       }
