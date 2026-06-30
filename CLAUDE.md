@@ -16,6 +16,8 @@ uv run streamlit run streamlit_app.py
 - **Typecheck**: `uv run ty check`
 - **Test**: `uv run pytest`
 
+These same four checks run in CI (`.github/workflows/ci.yml`) on every push to `main` and pull request, and locally as Claude Code hooks (`.claude/settings.json`).
+
 When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and ruff to ensure best practices are followed.
 
 ## Code Style
@@ -35,6 +37,10 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 `pyproject.toml` — ruff lint (`extend-select = ["I"]` turns on isort import sorting atop ruff's defaults; `combine-as-imports`), pytest (`pythonpath`), ty (`python-version = "3.12"`)
 
 `.python-version` — pins the project interpreter to `3.12` (via `uv python pin`), which `uv sync` / `uv run` honor automatically. Keeps the version you run and test against aligned with the `requires-python = ">=3.12"` floor and the ty type-check target, instead of letting uv auto-select the newest installed Python (e.g. 3.13).
+
+`.github/workflows/ci.yml` — GitHub Actions CI: runs the four Commands (lint, format `--check`, typecheck, test) under `uv sync --locked` on every push to `main` and pull request. Pinned to a `macos-14` (Apple Silicon) runner — required, since `mlx`/`mlx-metal` are `sys_platform == 'darwin'` in `uv.lock` and `streamlit_app.py` imports `mlx` at module top, so a Linux runner couldn't even collect the tests. `TestCIWorkflow` guards this config against drift.
+
+`.claude/settings.json` — project-shared Claude Code hooks: `ruff` format + lint-fix on each edited `.py` file, a guard blocking edits to `.env*` / `secrets.toml` / `uv.lock`, and the full quality gate on Stop. Personal overrides go in the gitignored `.claude/settings.local.json`.
 
 `.streamlit/config.toml` — an IBM Carbon-inspired theme: IBM Plex Sans/Mono (loaded from Google Fonts, so no local font files) over IBM's Blue 60 (`#0f62fe`) primary. Shared font/radius live in `[theme]`; per-mode colors in separate `[theme.light]` / `[theme.dark]` blocks — defining **both** is what surfaces the light/dark toggle in the app's settings menu (a lone `[theme]` locks one mode). Streamlit only *warns* on an unrecognized theme key (a casing typo silently disables that style), so `TestThemeConfig` cross-checks every key against `streamlit.config.get_config_options()`.
 

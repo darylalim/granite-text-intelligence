@@ -66,4 +66,6 @@ uv run ty check        # typecheck
 uv run pytest          # test
 ```
 
+These four checks also run in CI on every push and pull request (see the badge above), on an Apple Silicon runner.
+
 Configuration is in `pyproject.toml`.

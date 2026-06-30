@@ -12,7 +12,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest",
-    "pyyaml>=6.0.3",
+    "pyyaml",
     "ruff",
     "ty",
 ]
