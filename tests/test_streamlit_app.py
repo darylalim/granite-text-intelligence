@@ -566,3 +566,65 @@ class TestThemeConfig:
             key = f"{color}Color"
             assert key in theme["light"], f"{key} missing from [theme.light]"
             assert key in theme["dark"], f"{key} missing from [theme.dark]"
+
+
+class TestCIWorkflow:
+    """The GitHub Actions CI workflow ships in .github/workflows/ci.yml.
+
+    Like the theme config, CI fails *silently*: a dropped step or a runner
+    swapped to Linux (where the darwin-only mlx can't install, so the suite can't
+    even be collected) would still show a green check on whatever it does run.
+    These assertions pin the invariants that keep CI a faithful mirror of the
+    documented local gates.
+    """
+
+    WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "ci.yml"
+
+    def _workflow(self) -> dict:
+        # pyyaml is a dev-only dependency; import lazily so a missing parser fails
+        # just this class rather than the whole module at collection time (mirrors
+        # TestThemeConfig's lazy streamlit.config import).
+        import yaml
+
+        return yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
+
+    def _run_commands(self) -> str:
+        steps = self._workflow()["jobs"]["check"]["steps"]
+        return "\n".join(step["run"] for step in steps if "run" in step)
+
+    def test_workflow_exists_and_parses(self) -> None:
+        assert self.WORKFLOW.is_file()
+        self._workflow()  # raises yaml.YAMLError on a syntax error
+
+    def test_runs_on_apple_silicon(self) -> None:
+        # Load-bearing: uv.lock pins mlx/mlx-metal to sys_platform == 'darwin' and
+        # streamlit_app.py imports mlx at module top, so a Linux runner can't even
+        # collect the tests. A swap to ubuntu would break CI while the steps below
+        # still look correct.
+        runs_on = self._workflow()["jobs"]["check"]["runs-on"]
+        assert runs_on.startswith("macos"), runs_on
+
+    def test_runs_the_four_documented_gates(self) -> None:
+        # The four commands documented in CLAUDE.md / README "Development". A
+        # dropped step silently stops enforcing that gate while CI stays green.
+        runs = self._run_commands()
+        for command in (
+            "uv run ruff check .",
+            "uv run ruff format --check .",
+            "uv run ty check",
+            "uv run pytest",
+        ):
+            assert command in runs, f"missing CI gate: {command!r}"
+
+    def test_install_is_lockfile_pinned(self) -> None:
+        # --locked makes CI fail on a stale lockfile instead of silently resolving
+        # a different dependency set than uv.lock records.
+        assert "uv sync --locked" in self._run_commands()
+
+    def test_triggers_on_push_to_main_and_pull_requests(self) -> None:
+        # PyYAML (YAML 1.1) parses the bare `on:` key as the boolean True, so the
+        # trigger block lands under the True key rather than the string "on".
+        data = self._workflow()
+        triggers = data.get("on", data.get(True)) or {}
+        assert "main" in triggers["push"]["branches"]
+        assert "pull_request" in triggers
