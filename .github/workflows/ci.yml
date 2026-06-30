@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    # Apple Silicon — REQUIRED: uv.lock pins mlx/mlx-metal to sys_platform == 'darwin',
+    # and streamlit_app.py imports mlx at module top, so a Linux runner can't even
+    # collect the tests. macOS runners are free for public repos.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true # caches the uv cache dir, keyed on uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked # honors .python-version (3.12); fails if the lock is stale
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run ty check
+
+      - name: Test
+        run: uv run pytest
