@@ -6,6 +6,17 @@
 
 **Granite Text Intelligence** is a Streamlit application for **summarization, topic, intent, and sentiment analysis** using IBM's [granite-4.1-8b](https://huggingface.co/ibm-granite/granite-4.1-8b) on Apple Silicon with [MLX](https://github.com/ml-explore/mlx) (Apple's on-device ML framework, via `mlx-lm`), running locally. It's a single-shot playground: provide text, choose which analyses to run, and get the results back — all powered by prompting one Granite model. Results can be returned in the input's language or any of Granite's 12 supported languages.
 
+<table>
+  <tr>
+    <td align="center"><strong>Light</strong></td>
+    <td align="center"><strong>Dark</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshot-light.png" alt="Granite Text Intelligence in light mode: the Product review sample analyzed, with the Sentiment tab showing a positive result at 95% confidence"></td>
+    <td><img src="docs/images/screenshot-dark.png" alt="Granite Text Intelligence in dark mode: the Product review sample analyzed, with the Sentiment tab showing a positive result at 95% confidence"></td>
+  </tr>
+</table>
+
 Requires an Apple Silicon (M-series) Mac with ~24 GB+ of unified memory (32 GB recommended) — the 8B model uses ~16.8 GB in bf16 (bfloat16). On lower-memory Macs, set `MODEL_NAME` in `streamlit_app.py` to a 4-bit quant such as `mlx-community/granite-4.1-8b-4bit` (~5.2 GB) to cut memory roughly 3× for a small quality cost.
 
 ## Setup
