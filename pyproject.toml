@@ -1,7 +1,7 @@
 [project]
 name = "granite-text-intelligence"
 version = "0.1.0"
-description = "Streamlit application for analyzing text using IBM Granite on Apple Silicon with MLX."
+description = "Streamlit application for summarization, topic, intent, and sentiment analysis using IBM Granite on Apple Silicon with MLX."
 requires-python = ">=3.12"
 dependencies = [
     "mlx-lm>=0.31,<0.32",
