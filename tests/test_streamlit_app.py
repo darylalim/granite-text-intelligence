@@ -599,10 +599,16 @@ class TestCIWorkflow:
     def test_runs_on_apple_silicon(self) -> None:
         # Load-bearing: uv.lock pins mlx/mlx-metal to sys_platform == 'darwin' and
         # streamlit_app.py imports mlx at module top, so a Linux runner can't even
-        # collect the tests. A swap to ubuntu would break CI while the steps below
-        # still look correct.
+        # collect the tests. But `sys_platform == 'darwin'` is true on Intel macOS
+        # too, where the arm64-only mlx wheels won't install — so macos-13 and
+        # earlier (Intel) would break `uv sync` while a bare startswith("macos")
+        # stayed green. Require Apple Silicon: macos-14+ (or the macos-latest alias,
+        # currently arm64).
         runs_on = self._workflow()["jobs"]["check"]["runs-on"]
         assert runs_on.startswith("macos"), runs_on
+        if runs_on != "macos-latest":
+            major = int(runs_on.removeprefix("macos-").split("-")[0])
+            assert major >= 14, runs_on
 
     def test_runs_the_four_documented_gates(self) -> None:
         # The four commands documented in CLAUDE.md / README "Development". A

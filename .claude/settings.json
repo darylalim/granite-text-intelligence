@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.env.example|*/.env.example) ;; *.env|*/.env|*.env.*|*/secrets.toml|uv.lock|*/uv.lock) echo 'Blocked: edit .env/.env.* via your editor; regenerate uv.lock with uv lock; secrets.toml is off-limits. (Guards Edit/Write/MultiEdit only, not Bash — this is an accident guardrail, not a security boundary.)' >&2; exit 2;; esac"
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.env.example|*/.env.example) ;; *.env|*/.env|*/.env.*|.env.*|*/secrets.toml|uv.lock|*/uv.lock) echo 'Blocked: edit .env/.env.* via your editor; regenerate uv.lock with uv lock; secrets.toml is off-limits. (Guards Edit/Write/MultiEdit only, not Bash — this is an accident guardrail, not a security boundary.)' >&2; exit 2;; esac"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py) uv run ruff check --fix \"$f\" && uv run ruff format \"$f\";; esac"
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py) uv run ruff format \"$f\" && uv run ruff check --fix \"$f\";; esac"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run ruff check . && uv run ty check && uv run pytest -q"
+            "command": "uv run ruff check . && uv run ruff format --check . && uv run ty check && uv run pytest -q"
           }
         ]
       }

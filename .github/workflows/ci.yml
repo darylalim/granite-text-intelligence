@@ -5,12 +5,23 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: this job only reads the repo to lint/type/test.
+permissions:
+  contents: read
+
+# Cancel superseded runs for the same ref on PRs (each push otherwise spins a
+# fresh, slot-contended macOS runner); let push-to-main runs finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     # Apple Silicon — REQUIRED: uv.lock pins mlx/mlx-metal to sys_platform == 'darwin',
     # and streamlit_app.py imports mlx at module top, so a Linux runner can't even
     # collect the tests. macOS runners are free for public repos.
     runs-on: macos-14
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
