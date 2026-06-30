@@ -69,3 +69,7 @@ uv run pytest          # test
 These four checks also run in CI on every push to `main` and pull request (see the badge above), on an Apple Silicon runner.
 
 Configuration is in `pyproject.toml`.
+
+## License
+
+This project's code is released under the [Apache License 2.0](LICENSE). The IBM Granite model it loads is distributed separately under [its own Apache 2.0 license](https://huggingface.co/ibm-granite/granite-4.1-8b) and is downloaded at runtime, not included in this repository.
