@@ -36,6 +36,8 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 `pyproject.toml` — ruff lint (`extend-select = ["I"]` turns on isort import sorting atop ruff's defaults; `combine-as-imports`), pytest (`pythonpath`), ty (`python-version = "3.12"`)
 
+`LICENSE` — Apache License 2.0 (full canonical text, copyright Daryl Lim); the project's **code** is released under it. Declared to tooling in `pyproject.toml` via PEP 639 SPDX fields (`license = "Apache-2.0"`, `license-files = ["LICENSE"]`) and summarized in the README's License section. The IBM Granite model is licensed separately (also Apache 2.0) and downloaded at runtime, not vendored here.
+
 `.python-version` — pins the project interpreter to `3.12` (via `uv python pin`), which `uv sync` / `uv run` honor automatically. Keeps the version you run and test against aligned with the `requires-python = ">=3.12"` floor and the ty type-check target, instead of letting uv auto-select the newest installed Python (e.g. 3.13).
 
 `.github/workflows/ci.yml` — GitHub Actions CI: runs the four Commands (lint, format `--check`, typecheck, test) under `uv sync --locked` on every push to `main` and pull request. Pinned to a `macos-14` (Apple Silicon) runner — required, since `mlx`/`mlx-metal` are `sys_platform == 'darwin'` in `uv.lock` and `streamlit_app.py` imports `mlx` at module top, so a Linux runner couldn't even collect the tests. `TestCIWorkflow` guards this config against drift.
