@@ -12,11 +12,13 @@ uv run streamlit run streamlit_app.py
 ## Commands
 
 - **Lint**: `uv run ruff check .`
-- **Format**: `uv run ruff format .`
+- **Format**: `uv run ruff format .` — reaches **Markdown as well as Python**: ruff ≥ 0.16 formats the code inside `python`-tagged fenced blocks, so a mis-spaced snippet in `CLAUDE.md` fails `--check` in CI exactly like a `.py` file would. **Formatting only** — `ruff check` skips Markdown outright (it reports "No Python files found" and exits 0), so an unused or unsorted import inside a fence is *not* linted. `README.md` is untouched today; its fences are all `bash`.
 - **Typecheck**: `uv run ty check`
 - **Test**: `uv run pytest`
 
 These same four checks run in CI (`.github/workflows/ci.yml`) on every push to `main` and pull request, and locally as Claude Code hooks (`.claude/settings.json`).
+
+No dev tool carries a version constraint in `pyproject.toml`. `uv.lock` still pins exact versions and CI runs `uv sync --locked`, so any given build is reproducible — but nothing bounds what the *next* `uv lock --upgrade` pulls in, which means a **linter upgrade can redefine the gate without a line of our code changing**: ruff 0.16 expanded its default rule set (see Error Handling for the `BLE001` fallout) and widened the formatter to Markdown, both of which landed as gate failures on a routine `uv lock --upgrade`. Treat a ruff/ty major as its own reviewable change rather than incidental lockfile noise.
 
 When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and ruff to ensure best practices are followed.
 
@@ -42,7 +44,7 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 `.github/workflows/ci.yml` — GitHub Actions CI: runs the four Commands (lint, format `--check`, typecheck, test) under `uv sync --locked` on every push to `main` and pull request. Pinned to a `macos-14` (Apple Silicon) runner — required, since `mlx`/`mlx-metal` are `sys_platform == 'darwin'` in `uv.lock` and `streamlit_app.py` imports `mlx` at module top, so a Linux runner couldn't even collect the tests. `TestCIWorkflow` guards this config against drift.
 
-`.claude/settings.json` — project-shared Claude Code hooks: `ruff` format + lint-fix on each edited `.py` file, a guard blocking edits to `.env` / `.env.*` (the committed `.env.example` is exempt so the template stays editable) / `secrets.toml` / `uv.lock`, and the full quality gate on Stop. Personal overrides go in the gitignored `.claude/settings.local.json`.
+`.claude/settings.json` — project-shared Claude Code hooks: `ruff` format + lint-fix on each edited `.py` file and `ruff format` on each edited `.md` file (format only — `ruff check` is a no-op on Markdown; the `.md` branch exists because ruff ≥ 0.16 made doc snippets a formatted artifact the Stop hook and CI enforce), a guard blocking edits to `.env` / `.env.*` (the committed `.env.example` is exempt so the template stays editable) / `secrets.toml` / `uv.lock`, and the full quality gate on Stop. Personal overrides go in the gitignored `.claude/settings.local.json`.
 
 `.streamlit/config.toml` — an IBM Carbon-inspired theme: IBM Plex Sans/Mono (loaded from Google Fonts, so no local font files) over IBM's Blue 60 (`#0f62fe`) primary. Shared font/radius live in `[theme]`; per-mode colors in separate `[theme.light]` / `[theme.dark]` blocks — defining **both** is what surfaces the light/dark toggle in the app's settings menu (a lone `[theme]` locks one mode). Streamlit only *warns* on an unrecognized theme key (a casing typo silently disables that style), so `TestThemeConfig` cross-checks every key against `streamlit.config.get_config_options()`.
 
@@ -64,6 +66,7 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 
 ```python
 from mlx_lm import generate, load
+
 model, tokenizer = load("mlx-community/granite-4.1-8b-4bit")
 ```
 
@@ -130,6 +133,8 @@ Each feature builds `[{"role": "system", ...}, {"role": "user", ...}]`, applies 
 ### Error Handling
 
 Unexpected exceptions during a run — and during per-feature rendering — are shown with `st.exception()`. JSON parse failures degrade gracefully to the raw response, and `render_result` guards/coerces untrusted model output before passing it to `st.metric` / `st.dataframe`.
+
+Both of those `except Exception` handlers carry an inline `# noqa: BLE001` naming their role (top-level run guard / untrusted model output shape). `BLE001` ("do not catch blind exception") entered ruff's **default** rule set in 0.16, and it is right about blind catches in general — but these two are deliberate UI boundaries: a Streamlit script has no frame above it to catch anything, so an escaped exception blanks the page instead of showing the user what broke. The suppression is per-line rather than a project-wide `ignore` in `pyproject.toml` **on purpose** — the rule stays live, so a third, *unintentional* blind catch added later still fails the lint gate.
 
 ## Tests
 

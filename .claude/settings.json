@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py) uv run ruff format \"$f\" && uv run ruff check --fix \"$f\";; esac"
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py) uv run ruff format \"$f\" && uv run ruff check --fix \"$f\";; *.md) uv run ruff format \"$f\";; esac"
           }
         ]
       }

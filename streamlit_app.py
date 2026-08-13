@@ -3,9 +3,9 @@ import os
 import re
 from typing import Any, cast
 
-import mlx.nn as nn
 import streamlit as st
 from dotenv import load_dotenv
+from mlx import nn
 from mlx_lm import generate, load
 from mlx_lm.sample_utils import make_logits_processors, make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
@@ -561,7 +561,7 @@ with results_column:
                 "truncated": was_truncated,
                 "signature": _run_signature(input_text, enabled, language),
             }
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 (top-level run guard)
             st.exception(exc)
 
     results = cast("dict[str, Any] | None", st.session_state.results)
@@ -609,7 +609,7 @@ with results_column:
             if results is not None and key in results["data"]:
                 try:
                     render_result(key, results["data"][key])
-                except Exception as exc:  # untrusted model output shape
+                except Exception as exc:  # noqa: BLE001 (untrusted model output shape)
                     st.warning("Could not render this result.")
                     st.exception(exc)
             elif results is None:
