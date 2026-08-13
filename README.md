@@ -17,7 +17,7 @@
   </tr>
 </table>
 
-Requires an Apple Silicon (M-series) Mac with ~24 GB+ of unified memory (32 GB recommended) — the 8B model uses ~16.8 GB in bf16 (bfloat16). On lower-memory Macs, set `MODEL_NAME` in `streamlit_app.py` to a 4-bit quant such as `mlx-community/granite-4.1-8b-4bit` (~5.2 GB) to cut memory roughly 3× for a small quality cost.
+Requires an Apple Silicon (M-series) Mac with ~16 GB+ of unified memory — the default model is a 4-bit quantization of the 8B ([`mlx-community/granite-4.1-8b-4bit`](https://huggingface.co/mlx-community/granite-4.1-8b-4bit)), which uses ~5.2 GB for weights plus up to ~2.6 GB of KV cache at the default input length. For maximum fidelity on a 32 GB+ Mac, set `MODEL_NAME` in `streamlit_app.py` to `mlx-community/granite-4.1-8b-8bit` (~9.4 GB) or `mlx-community/granite-4.1-8b-bf16` (~16.8 GB, full precision).
 
 ## Setup
 
@@ -28,12 +28,12 @@ uv sync
 uv run streamlit run streamlit_app.py
 ```
 
-The model (~16.8 GB, bf16) downloads automatically the first time you click **Run** (you'll see a "Loading model…" spinner) and is cached for later runs.
+The model (~5.2 GB, 4-bit) downloads automatically the first time you click **Run** (you'll see a "Loading model…" spinner) and is cached for later runs.
 
 ### Troubleshooting
 
-- **First Run is slow.** The initial click loads ~16.8 GB into unified memory; the "Loading model…" and per-feature spinners mean it's working, not hung.
-- **Out of memory?** Switch `MODEL_NAME` to the 4-bit quant noted above (`mlx-community/granite-4.1-8b-4bit`), which needs ~5.2 GB.
+- **First Run is slow.** The initial click loads ~5.2 GB into unified memory; the "Loading model…" and per-feature spinners mean it's working, not hung.
+- **Out of memory?** Lower `MAX_INPUT_TOKENS` to shrink the KV cache, or switch `MODEL_NAME` to the smaller [`mlx-community/granite-4.1-3b-4bit`](https://huggingface.co/mlx-community/granite-4.1-3b-4bit) (~2.1 GB of weights, and half the KV cache per token).
 - **Interrupted download?** Re-run — downloads resume from the Hugging Face cache rather than starting over.
 
 ## Usage

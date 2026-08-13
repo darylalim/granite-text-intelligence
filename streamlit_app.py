@@ -12,7 +12,12 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 load_dotenv()  # populate HF_TOKEN from .env; deploy env vars take precedence
 
-MODEL_NAME = "mlx-community/granite-4.1-8b-bf16"
+# 4-bit (affine, group_size 32) MLX conversion of ibm-granite/granite-4.1-8b:
+# ~5.2 GB of weights vs ~16.8 GB for the bf16 build, same architecture and
+# tokenizer. Quantization touches weights only, so the KV cache below is
+# unaffected. Swap in "…-8b-bf16" (or "…-8b-8bit", ~9.4 GB) for more fidelity
+# on a larger Mac.
+MODEL_NAME = "mlx-community/granite-4.1-8b-4bit"
 
 # Granite 4.1's 128K context ceiling; configured caps are clamped to it.
 MODEL_MAX_TOKENS = 131072
@@ -187,12 +192,12 @@ LANGUAGES: list[str] = [
     "Chinese",
 ]
 
-# Languages whose output costs materially more tokens than the English-tuned
-# `max_tokens` budgets, so structured output risks truncating mid-JSON. These
-# (and "Match input", which can target any of them) get an enlarged budget — see
-# `_effective_max_tokens`. max_tokens is a ceiling, so the extra headroom is free
-# for short outputs (generation still stops at EOS).
-_TOKEN_HEAVY_LANGUAGES = {"Japanese", "Chinese", "Korean", "Arabic"}
+# Localized output costs materially more tokens than the English-tuned
+# `max_tokens` budgets, so structured output risks truncating mid-JSON. Every
+# non-English target gets an enlarged budget — see `_effective_max_tokens`.
+# max_tokens is a ceiling, so the extra headroom is free (generation stops at
+# EOS). This deliberately covers Latin-script languages, not just CJK/Arabic: a
+# German rationale overran the sentiment feature's 128-token budget in testing.
 _LOCALIZED_TOKEN_MULTIPLIER = 2
 
 
@@ -262,6 +267,23 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
     JSON keys and enumerated values (e.g. the sentiment label) must stay English
     so parse_json_output and render_result — which read results by English key —
     keep working. Returns "" for English (the prompts are already English).
+
+    Two wording choices are deliberate, both fixes for observed misbehavior:
+
+    * The keep-English exception comes *first* and the localize requirement
+      last, so the instruction nearest the generation point is the one we most
+      need honored. The old order ("localize …, but keep … English") let the
+      trailing English clause dominate and left rationale text in English.
+    * The JSON branch names the feature's own localizable field (rationale /
+      topic label) rather than an abstract "all free-text field values", and
+      names it **unquoted**. Quoting it (`each topic "label"`) reliably
+      collapsed Japanese labels into meaningless katakana — apparently read as
+      a literal string to emit rather than a field to translate. Field names
+      here stay unquoted for that reason; the schema in the system prompt is
+      what pins the actual key spelling.
+
+    The requirement is never phrased as a negative ("not in English"): under
+    LANGUAGE_AUTO the target may itself be English, which would contradict it.
     """
     if language == LANGUAGE_ENGLISH:
         return ""
@@ -269,26 +291,38 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
         "the same language as the text above" if language == LANGUAGE_AUTO else language
     )
     if feature["output"] == "prose":
-        return f"\n\nWrite your entire response in {target}."
+        # The trailing clause suppresses notes like "(Note: written in Japanese
+        # as requested)", which the system prompt's "no preamble" already bars.
+        return (
+            f"\n\nWrite your entire response in {target}. Output only the "
+            f"response itself, with no note or comment about the language used."
+        )
+    localized = (
+        "every topic label" if feature["key"] == "topics" else "the rationale text"
+    )
     return (
-        f"\n\nWrite all free-text field values (such as rationale and topic "
-        f"labels) in {target}, but keep every JSON key and any enumerated value "
-        f"(such as the sentiment label) in English."
+        f"\n\nKeep every JSON key exactly as given in the schema, and keep "
+        f"enumerated values (such as the sentiment label) in English. "
+        f"Write {localized} in {target}."
     )
 
 
 def _effective_max_tokens(feature: dict[str, Any], language: str) -> int:
-    """Output-token budget for a feature, enlarged for token-heavy languages.
+    """Output-token budget for a feature, enlarged for any non-English output.
 
-    CJK/Arabic output costs more tokens than the English-tuned `max_tokens`, so a
-    localized rationale/labels can truncate mid-JSON. Those languages — and
-    "Match input", which can target any of them — get a larger ceiling; since
-    generation stops at EOS, the headroom is free for short (e.g. English) output.
+    The `max_tokens` values are tuned for English. Every other target costs more
+    tokens for the same content: most acutely CJK/Arabic, but Latin-script
+    languages too, since their accents and compounds fragment badly in a
+    largely-English BPE vocabulary. A localized rationale or label set that runs
+    past the budget truncates mid-object and fails to parse, so every
+    non-English target — including "Match input", which can resolve to any of
+    them — gets the larger ceiling. Since generation stops at EOS, the headroom
+    is free: short output simply finishes early.
     """
     base = feature["max_tokens"]
-    if language in _TOKEN_HEAVY_LANGUAGES or language == LANGUAGE_AUTO:
-        return base * _LOCALIZED_TOKEN_MULTIPLIER
-    return base
+    if language == LANGUAGE_ENGLISH:
+        return base
+    return base * _LOCALIZED_TOKEN_MULTIPLIER
 
 
 def run_feature(

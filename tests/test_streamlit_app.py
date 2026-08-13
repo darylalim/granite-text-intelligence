@@ -15,6 +15,7 @@ from streamlit_app import (
     LABELS,
     LANGUAGE_AUTO,
     LANGUAGE_ENGLISH,
+    LANGUAGES,
     MAX_INPUT_TOKENS,
     MODEL_MAX_TOKENS,
     _effective_max_tokens,
@@ -417,6 +418,50 @@ class TestLanguageDirective:
         assert "same language as the text" in directive
         assert LANGUAGE_AUTO not in directive  # not the literal "Match input" label
 
+    @pytest.mark.parametrize(
+        ("index", "field"),
+        [
+            pytest.param(1, "label", id="topics-names-label"),
+            pytest.param(2, "rationale", id="intents-names-rationale"),
+            pytest.param(3, "rationale", id="sentiment-names-rationale"),
+        ],
+    )
+    def test_json_names_the_feature_own_localizable_field(
+        self, index: int, field: str
+    ) -> None:
+        # Naming the concrete field beats "all free-text field values": the
+        # abstract phrasing was honored for topic labels but left rationale
+        # in English.
+        directive = language_directive(FEATURES[index], "Japanese")
+        assert field in directive
+        # ...but the name must stay UNQUOTED. Quoting it ('each topic "label"')
+        # collapsed Japanese labels into meaningless katakana, apparently read
+        # as a literal string to emit rather than a field to translate.
+        assert f'"{field}"' not in directive
+
+    def test_json_puts_the_localize_requirement_last(self) -> None:
+        # Instructions nearest the generation point carry the most weight, so
+        # the keep-English exception must not be the trailing clause.
+        directive = language_directive(FEATURES[3], "Japanese")
+        assert directive.rindex("Japanese") > directive.rindex("English")
+
+    def test_prose_suppresses_language_commentary(self) -> None:
+        # Guards against trailing asides like "(Note: written in Japanese as
+        # requested)" leaking into the summary.
+        directive = language_directive(FEATURES[0], "Japanese")
+        assert "no note or comment about the language" in directive
+
+    @pytest.mark.parametrize(
+        "index",
+        [pytest.param(i, id=FEATURES[i]["key"]) for i in range(len(FEATURES))],
+    )
+    def test_match_input_avoids_negative_phrasing(self, index: int) -> None:
+        # Under "Match input" the target language may itself be English, so a
+        # "not in English" instruction would contradict itself.
+        directive = language_directive(FEATURES[index], LANGUAGE_AUTO)
+        assert "not in English" not in directive
+        assert "not English" not in directive
+
 
 class TestResolveMaxInputTokens:
     def test_default_when_unset(self) -> None:
@@ -443,8 +488,9 @@ class TestResolveMaxInputTokens:
                 assert _resolve_max_input_tokens() == _DEFAULT_MAX_INPUT_TOKENS
 
     def test_default_and_ceiling_pinned(self) -> None:
-        # Deliberate choices: 16K is the memory-safe bf16 default on a 32 GB Mac;
-        # 131072 is Granite 4.1's 128K ceiling. Pinned so neither drifts silently.
+        # Deliberate choices: 16K is the memory-safe default (~2.6 GB of KV cache
+        # at ~160 KB/token, independent of the weights' quantization); 131072 is
+        # Granite 4.1's 128K ceiling. Pinned so neither drifts silently.
         assert _DEFAULT_MAX_INPUT_TOKENS == 16384
         assert MODEL_MAX_TOKENS == 131072
         # The default must itself sit inside the clamp range.
@@ -456,13 +502,20 @@ class TestEffectiveMaxTokens:
         feature = FEATURES[3]  # sentiment
         assert _effective_max_tokens(feature, "English") == feature["max_tokens"]
 
-    def test_latin_language_uses_base_budget(self) -> None:
+    @pytest.mark.parametrize(
+        "language",
+        [
+            pytest.param(lang, id=lang.replace(" ", "-").lower())
+            for lang in LANGUAGES
+            if lang != LANGUAGE_ENGLISH
+        ],
+    )
+    def test_every_non_english_target_enlarges_budget(self, language: str) -> None:
+        # Latin-script targets are included deliberately: a localized German
+        # rationale overran the sentiment feature's 128-token budget and
+        # truncated mid-object, so restricting this to CJK/Arabic is not enough.
         feature = FEATURES[3]
-        assert _effective_max_tokens(feature, "German") == feature["max_tokens"]
-
-    def test_token_heavy_language_enlarges_budget(self) -> None:
-        feature = FEATURES[3]
-        assert _effective_max_tokens(feature, "Japanese") == feature["max_tokens"] * 2
+        assert _effective_max_tokens(feature, language) == feature["max_tokens"] * 2
 
     def test_match_input_enlarges_budget(self) -> None:
         feature = FEATURES[0]  # summary
