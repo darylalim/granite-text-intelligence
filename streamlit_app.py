@@ -68,7 +68,13 @@ _JSON_SYSTEM = (
 )
 
 # Each feature is fully described by its prompt, output kind, and token budget.
-# `label` names the toggle; `tab_label` names the result tab.
+# `label` names the toggle; `tab_label` names the result tab. Every JSON feature
+# also declares `localized_field`: the phrase naming its own free-text value
+# ("every topic label"), which language_directive drops into the prompt. It
+# lives here rather than as a branch inside language_directive so a newly added
+# feature cannot silently inherit another feature's field name — omitting it
+# raises a KeyError instead of telling the model to translate a field the
+# schema does not have.
 FEATURES: list[dict[str, Any]] = [
     {
         "key": "summary",
@@ -94,6 +100,7 @@ FEATURES: list[dict[str, Any]] = [
         "help": "Identifies and ranks the main topics in your text.",
         "output": "json",
         "max_tokens": 256,
+        "localized_field": "every topic label",
         "system": _JSON_SYSTEM.format(
             schema=(
                 '{"type":"object","properties":{"topics":{"type":"array","items":'
@@ -115,6 +122,7 @@ FEATURES: list[dict[str, Any]] = [
         "help": "Determines the primary intent expressed in your text.",
         "output": "json",
         "max_tokens": 256,
+        "localized_field": "the rationale text",
         "system": _JSON_SYSTEM.format(
             schema=(
                 '{"type":"object","properties":{"intent":{"type":"string"},'
@@ -135,6 +143,7 @@ FEATURES: list[dict[str, Any]] = [
         "help": "Classifies overall sentiment as positive, negative, neutral, or mixed.",
         "output": "json",
         "max_tokens": 128,
+        "localized_field": "the rationale text",
         "system": _JSON_SYSTEM.format(
             schema=(
                 '{"type":"object","properties":{"sentiment":{"type":"string",'
@@ -268,22 +277,33 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
     so parse_json_output and render_result — which read results by English key —
     keep working. Returns "" for English (the prompts are already English).
 
-    Two wording choices are deliberate, both fixes for observed misbehavior:
+    Three wording choices are deliberate, each a fix for observed misbehavior
+    and each settled by an A/B against the live model (see CLAUDE.md):
 
-    * The keep-English exception comes *first* and the localize requirement
-      last, so the instruction nearest the generation point is the one we most
-      need honored. The old order ("localize …, but keep … English") let the
-      trailing English clause dominate and left rationale text in English.
-    * The JSON branch names the feature's own localizable field (rationale /
-      topic label) rather than an abstract "all free-text field values", and
-      names it **unquoted**. Quoting it (`each topic "label"`) reliably
-      collapsed Japanese labels into meaningless katakana — apparently read as
-      a literal string to emit rather than a field to translate. Field names
-      here stay unquoted for that reason; the schema in the system prompt is
-      what pins the actual key spelling.
+    1. **Order.** The keep-English exception comes first and the localize
+       requirement last, so the instruction nearest the generation point is the
+       one we most need honored. The old order ("localize …, but keep …
+       English") let the trailing English clause dominate and left rationale
+       text in English.
+    2. **Own field.** The JSON branch names the feature's own localizable field
+       (rationale / topic label) rather than an abstract "all free-text field
+       values", which the model applied to topic labels but not to rationale.
+    3. **Unquoted.** That field name carries no quotes. Quoting it (`each topic
+       "label"`) reliably collapsed Japanese labels into meaningless katakana —
+       apparently read as a literal string to emit rather than a field to
+       translate. The schema in the system prompt is what pins the actual key
+       spelling, so the directive does not need to quote it.
 
-    The requirement is never phrased as a negative ("not in English"): under
-    LANGUAGE_AUTO the target may itself be English, which would contradict it.
+    A fourth constraint is not a wording choice but a correctness one: the
+    requirement is never phrased as a negative ("not in English"), because
+    under LANGUAGE_AUTO the target may itself be English and contradict it.
+
+    The "such as the sentiment label" aside is deliberately sent to *all three*
+    JSON features even though only Sentiment has an enum. It reads as dead
+    weight in the Topics and Intents prompts, but a second A/B replacing it
+    with a feature-aware clause (keys-only where no enum exists) collapsed
+    Japanese topic labels into meaningless katakana in both variants tried.
+    The clause is load-bearing for reasons that are not obvious; leave it.
     """
     if language == LANGUAGE_ENGLISH:
         return ""
@@ -297,13 +317,10 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
             f"\n\nWrite your entire response in {target}. Output only the "
             f"response itself, with no note or comment about the language used."
         )
-    localized = (
-        "every topic label" if feature["key"] == "topics" else "the rationale text"
-    )
     return (
         f"\n\nKeep every JSON key exactly as given in the schema, and keep "
         f"enumerated values (such as the sentiment label) in English. "
-        f"Write {localized} in {target}."
+        f"Write {feature['localized_field']} in {target}."
     )
 
 

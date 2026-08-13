@@ -28,6 +28,13 @@ from streamlit_app import (
     truncate_to_tokens,
 )
 
+_JSON_FEATURES = [
+    pytest.param(i, id=feature["key"])
+    for i, feature in enumerate(FEATURES)
+    if feature["output"] == "json"
+]
+_ALL_FEATURES = [pytest.param(i, id=f["key"]) for i, f in enumerate(FEATURES)]
+
 
 class TestFeatures:
     def test_four_features_in_order(self) -> None:
@@ -57,6 +64,25 @@ class TestFeatures:
             # Material Symbol shortcode driving the result tab (e.g. ":material/mood:").
             assert feature["icon"].startswith(":material/")
             assert feature["icon"].endswith(":")
+
+    @pytest.mark.parametrize("index", _JSON_FEATURES)
+    def test_json_features_declare_their_localized_field(self, index: int) -> None:
+        # language_directive indexes this directly, so a new JSON feature that
+        # omits it raises rather than inheriting another feature's field name
+        # and telling the model to translate a field its schema lacks.
+        feature = FEATURES[index]
+        assert feature["localized_field"]
+        # Some word in the phrase must name a field the feature's own schema
+        # declares ("every topic label" -> label, "the rationale text" ->
+        # rationale), so the directive can't point at a field that isn't there.
+        words = feature["localized_field"].split()
+        assert any(f'"{word}"' in feature["system"] for word in words), (
+            f"{feature['key']}: {feature['localized_field']!r} names no schema field"
+        )
+
+    def test_prose_features_declare_no_localized_field(self) -> None:
+        # Prose localizes the entire response, so there is no field to name.
+        assert "localized_field" not in FEATURES[0]
 
     def test_only_summary_is_prose(self) -> None:
         assert FEATURES[0]["output"] == "prose"
@@ -439,11 +465,21 @@ class TestLanguageDirective:
         # as a literal string to emit rather than a field to translate.
         assert f'"{field}"' not in directive
 
-    def test_json_puts_the_localize_requirement_last(self) -> None:
+    @pytest.mark.parametrize("index", _JSON_FEATURES)
+    @pytest.mark.parametrize("language", [LANGUAGE_AUTO, "Japanese", "German"])
+    def test_json_puts_the_localize_requirement_last(
+        self, index: int, language: str
+    ) -> None:
         # Instructions nearest the generation point carry the most weight, so
-        # the keep-English exception must not be the trailing clause.
-        directive = language_directive(FEATURES[3], "Japanese")
-        assert directive.rindex("Japanese") > directive.rindex("English")
+        # the keep-English exception must not be the trailing clause. Located
+        # with find(), not rindex(): a missing clause must fail this assertion
+        # rather than raise ValueError and obscure which invariant broke.
+        directive = language_directive(FEATURES[index], language)
+        keep_at = directive.find("Keep every JSON key")
+        write_at = directive.find("Write ")
+        assert keep_at != -1, "keep-English clause missing"
+        assert write_at != -1, "localize clause missing"
+        assert keep_at < write_at
 
     def test_prose_suppresses_language_commentary(self) -> None:
         # Guards against trailing asides like "(Note: written in Japanese as
@@ -451,16 +487,33 @@ class TestLanguageDirective:
         directive = language_directive(FEATURES[0], "Japanese")
         assert "no note or comment about the language" in directive
 
-    @pytest.mark.parametrize(
-        "index",
-        [pytest.param(i, id=FEATURES[i]["key"]) for i in range(len(FEATURES))],
+    # Ways a future edit might re-introduce the contradiction below.
+    _NEGATIVE_ENGLISH = (
+        "not in English",
+        "not English",
+        "never in English",
+        "avoid English",
+        "instead of English",
+        "rather than English",
     )
-    def test_match_input_avoids_negative_phrasing(self, index: int) -> None:
-        # Under "Match input" the target language may itself be English, so a
-        # "not in English" instruction would contradict itself.
-        directive = language_directive(FEATURES[index], LANGUAGE_AUTO)
-        assert "not in English" not in directive
-        assert "not English" not in directive
+
+    @pytest.mark.parametrize("index", _JSON_FEATURES)
+    @pytest.mark.parametrize("language", [LANGUAGE_AUTO, "Japanese", "German"])
+    def test_json_keeps_english_positively(self, index: int, language: str) -> None:
+        directive = language_directive(FEATURES[index], language)
+        # Non-vacuous: the keep-English clause must actually be present...
+        assert "English" in directive
+        # ...but only ever as a positive instruction about keys and enums. Under
+        # "Match input" the target may itself be English, so telling the model
+        # to avoid English would contradict the directive's own requirement.
+        for phrase in self._NEGATIVE_ENGLISH:
+            assert phrase not in directive
+
+    @pytest.mark.parametrize("language", [LANGUAGE_AUTO, "Japanese", "German"])
+    def test_prose_makes_no_claim_about_english(self, language: str) -> None:
+        # Prose localizes the whole response, so it has no keys or enums to
+        # exempt — any mention of English here could only be a prohibition.
+        assert "English" not in language_directive(FEATURES[0], language)
 
 
 class TestResolveMaxInputTokens:
@@ -498,10 +551,12 @@ class TestResolveMaxInputTokens:
 
 
 class TestEffectiveMaxTokens:
-    def test_english_uses_base_budget(self) -> None:
-        feature = FEATURES[3]  # sentiment
-        assert _effective_max_tokens(feature, "English") == feature["max_tokens"]
+    @pytest.mark.parametrize("index", _ALL_FEATURES)
+    def test_english_uses_base_budget(self, index: int) -> None:
+        feature = FEATURES[index]
+        assert _effective_max_tokens(feature, LANGUAGE_ENGLISH) == feature["max_tokens"]
 
+    @pytest.mark.parametrize("index", _ALL_FEATURES)
     @pytest.mark.parametrize(
         "language",
         [
@@ -510,18 +565,15 @@ class TestEffectiveMaxTokens:
             if lang != LANGUAGE_ENGLISH
         ],
     )
-    def test_every_non_english_target_enlarges_budget(self, language: str) -> None:
-        # Latin-script targets are included deliberately: a localized German
-        # rationale overran the sentiment feature's 128-token budget and
-        # truncated mid-object, so restricting this to CJK/Arabic is not enough.
-        feature = FEATURES[3]
+    def test_every_non_english_target_enlarges_budget(
+        self, index: int, language: str
+    ) -> None:
+        # Covers LANGUAGE_AUTO too, since it is LANGUAGES[0]. Latin-script
+        # targets are included deliberately: a localized German rationale
+        # overran the sentiment feature's 128-token budget and truncated
+        # mid-object, so restricting this to CJK/Arabic is not enough.
+        feature = FEATURES[index]
         assert _effective_max_tokens(feature, language) == feature["max_tokens"] * 2
-
-    def test_match_input_enlarges_budget(self) -> None:
-        feature = FEATURES[0]  # summary
-        assert (
-            _effective_max_tokens(feature, LANGUAGE_AUTO) == feature["max_tokens"] * 2
-        )
 
 
 def _flatten_theme_items(
