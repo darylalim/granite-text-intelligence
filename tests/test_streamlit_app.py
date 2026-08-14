@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import shutil
+import subprocess
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
@@ -715,17 +717,12 @@ class TestCIWorkflow:
             major = int(runs_on.removeprefix("macos-").split("-")[0])
             assert major >= 14, runs_on
 
-    def test_runs_the_four_documented_gates(self) -> None:
-        # The four commands documented in CLAUDE.md / README "Development". A
-        # dropped step silently stops enforcing that gate while CI stays green.
-        runs = self._run_commands()
-        for command in (
-            "uv run ruff check .",
-            "uv run ruff format --check .",
-            "uv run ty check",
-            "uv run pytest",
-        ):
-            assert command in runs, f"missing CI gate: {command!r}"
+    def test_delegates_to_the_shared_quality_gate(self) -> None:
+        # The four commands documented in CLAUDE.md / README "Development" live in
+        # scripts/gate.sh so that CI and the Claude Code Stop hook cannot drift
+        # apart; TestHooksConfig pins what the script actually runs. Spelling them
+        # out here again would reintroduce precisely that drift.
+        assert "scripts/gate.sh" in self._run_commands()
 
     def test_install_is_lockfile_pinned(self) -> None:
         # --locked makes CI fail on a stale lockfile instead of silently resolving
@@ -739,3 +736,157 @@ class TestCIWorkflow:
         triggers = data.get("on", data.get(True)) or {}
         assert "main" in triggers["push"]["branches"]
         assert "pull_request" in triggers
+
+
+class TestHooksConfig:
+    """Claude Code hooks ship in .claude/settings.json and scripts/gate.sh.
+
+    The Stop gate fails the same way the theme config and CI do — silently. It
+    spent its whole lifetime chaining the four gates with `&&` and letting the
+    exit code fall through, but Claude Code treats *only* exit 2 as blocking
+    (ruff, ty and pytest all exit 1, which is a non-blocking error), so a red
+    gate printed a message and the turn ended anyway. Nothing caught that,
+    because nothing asserted on it. These pin the invariants that keep it a real
+    gate rather than a notification.
+    """
+
+    ROOT = Path(__file__).parent.parent
+    SETTINGS = ROOT / ".claude" / "settings.json"
+    GATE = ROOT / "scripts" / "gate.sh"
+
+    def _settings(self) -> dict:
+        return json.loads(self.SETTINGS.read_text(encoding="utf-8"))
+
+    def _commands(self, event: str) -> str:
+        return "\n".join(
+            hook["command"]
+            for matcher in self._settings()["hooks"][event]
+            for hook in matcher["hooks"]
+        )
+
+    def _gate(self) -> str:
+        return self.GATE.read_text(encoding="utf-8")
+
+    def test_settings_exists_and_parses(self) -> None:
+        assert self.SETTINGS.is_file()
+        self._settings()  # raises JSONDecodeError on a syntax error
+
+    def test_gate_script_is_executable(self) -> None:
+        # CI and the Stop hook both invoke it directly rather than through `sh`,
+        # so a dropped +x bit breaks both callers at once.
+        assert self.GATE.is_file()
+        assert os.access(self.GATE, os.X_OK), "scripts/gate.sh is not executable"
+
+    def test_gate_script_runs_all_four_documented_gates(self) -> None:
+        gate = self._gate()
+        for command in (
+            "uv run ruff check .",
+            "uv run ruff format --check .",
+            "uv run ty check",
+            "uv run pytest",
+        ):
+            assert command in gate, f"missing gate: {command!r}"
+
+    def _run_gate(
+        self, tmp_path: Path, uv_exit: int, uv_output: str = "DIAGNOSTIC"
+    ) -> subprocess.CompletedProcess[str]:
+        """Run gate.sh in a throwaway repo with `uv` stubbed to a fixed outcome.
+
+        Asserting on the script's *source* is too weak to be worth much: `exit 2`
+        and `>&2` both appear in its unrelated `cd`-failure branch, so a substring
+        check stays green even when the failure path itself is mutated to exit 1
+        or to drop the redirection (verified — both mutations passed a substring
+        assertion). Executing it is the only way these invariants can actually
+        fail. The stub also keeps the test hermetic and instant: the real gate
+        would run the suite recursively.
+        """
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        shutil.copy2(self.GATE, scripts / "gate.sh")
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        stub = bin_dir / "uv"
+        emit = f"printf '%s\\n' '{uv_output}'\n" if uv_output else ""
+        stub.write_text(f"#!/bin/sh\n{emit}exit {uv_exit}\n", encoding="utf-8")
+        stub.chmod(0o755)
+
+        return subprocess.run(
+            [str(scripts / "gate.sh")],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,  # a non-zero exit is the thing under test
+            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+        )
+
+    def test_gate_blocks_with_exit_2(self, tmp_path: Path) -> None:
+        # 1 is the conventional Unix failure code, and the one every tool the gate
+        # runs actually returns — but Claude Code reads it as a non-blocking error
+        # and lets the turn end on a red gate. Only 2 blocks.
+        assert self._run_gate(tmp_path, uv_exit=1).returncode == 2
+
+    def test_gate_reports_failures_on_stderr(self, tmp_path: Path) -> None:
+        # stderr is the stream fed back on a block, while ruff and pytest print
+        # their diagnostics to stdout; an unredirected failure blocks with no
+        # explanation attached.
+        result = self._run_gate(tmp_path, uv_exit=1, uv_output="RUFF-SAYS-NO")
+        assert "RUFF-SAYS-NO" in result.stderr
+        assert "RUFF-SAYS-NO" not in result.stdout
+
+    def test_gate_names_every_failing_gate(self, tmp_path: Path) -> None:
+        # No short-circuit: one block should report everything that is wrong,
+        # since Claude Code allows only 8 consecutive blocks to fix it all.
+        stderr = self._run_gate(tmp_path, uv_exit=1).stderr
+        for name in ("ruff check", "ruff format --check", "ty check", "pytest"):
+            assert name in stderr, f"failure not attributed to {name!r}"
+
+    def test_gate_passes_when_every_gate_passes(self, tmp_path: Path) -> None:
+        assert self._run_gate(tmp_path, uv_exit=0).returncode == 0
+
+    def test_gate_explains_a_silent_death(self, tmp_path: Path) -> None:
+        # A gate killed without writing anything — OOM, hook timeout, a
+        # half-created .venv — must not block with a blank message, which is the
+        # "blocked with no reason" failure the exit-2 change exists to remove.
+        result = self._run_gate(tmp_path, uv_exit=137, uv_output="")
+        assert result.returncode == 2
+        assert "no output" in result.stderr
+
+    def test_stop_hook_delegates_to_the_gate_script(self) -> None:
+        # Inlining the chain back into settings.json would put it beyond the reach
+        # of every assertion above: a JSON-escaped one-liner cannot be run, linted
+        # or shellchecked.
+        assert "scripts/gate.sh" in self._commands("Stop")
+
+    def test_stop_hook_runs_unconditionally(self) -> None:
+        # Two short-circuits were tried and both lost more than they saved. A
+        # `git status --porcelain` check skipped exactly the turns that had just
+        # committed work (committing clears dirtiness without clearing risk), and
+        # it failed open — a held index.lock silently disabled the gate. A
+        # `stop_hook_active` check made the gate one-shot: it blocked once, then
+        # let the next Stop through without re-running anything, so it never
+        # verified its own fix. Claude Code already caps a Stop hook at 8
+        # consecutive blocks, so neither guard was needed.
+        stop = self._commands("Stop")
+        assert "git status" not in stop
+        assert "stop_hook_active" not in stop
+
+    def test_format_hook_covers_python_and_markdown(self) -> None:
+        # ruff >= 0.16 formats python fences inside Markdown and CI's
+        # `ruff format --check .` reaches CLAUDE.md, so .md needs the same
+        # exit-2 contract .py gets or its failures vanish.
+        post = self._commands("PostToolUse")
+        assert "*.py" in post
+        assert "*.md" in post
+        assert "exit 2" in post
+
+    def test_secret_guard_covers_env_lockfile_and_secrets(self) -> None:
+        # An accident guardrail, not a security boundary: it matches Edit/Write/
+        # MultiEdit only, never Bash. The .env.example exemption keeps the
+        # committed template editable.
+        pre = self._commands("PreToolUse")
+        for pattern in ("*/.env", "*/secrets.toml", "*/uv.lock"):
+            assert pattern in pre, f"unguarded path: {pattern}"
+        assert "*/.env.example" in pre
+        assert "exit 2" in pre

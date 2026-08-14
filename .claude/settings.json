@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py) uv run ruff format \"$f\" && uv run ruff check --fix \"$f\";; *.md) uv run ruff format \"$f\";; esac"
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py|*.md) ;; *) exit 0;; esac; o=$(uv run ruff format \"$f\" 2>&1) || { printf 'ruff format: %s\\n' \"${o:-failed with no output}\" >&2; exit 2; }; case \"$f\" in *.py) o=$(uv run ruff check --fix \"$f\" 2>&1) || { printf 'ruff check: %s\\n' \"${o:-failed with no output}\" >&2; exit 2; };; esac"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run ruff check . && uv run ruff format --check . && uv run ty check && uv run pytest -q"
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}/scripts/gate.sh\""
           }
         ]
       }

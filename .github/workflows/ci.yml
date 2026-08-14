@@ -33,14 +33,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked # honors .python-version (3.12); fails if the lock is stale
 
-      - name: Lint
-        run: uv run ruff check .
-
-      - name: Format check
-        run: uv run ruff format --check .
-
-      - name: Type check
-        run: uv run ty check
-
-      - name: Test
-        run: uv run pytest
+      # The four gates live in scripts/gate.sh so CI and the Claude Code Stop
+      # hook run the same thing; TestHooksConfig asserts both still call it and
+      # that it still runs all four. The script reports every failing gate in
+      # one pass rather than stopping at the first, so a red run names
+      # everything that needs fixing.
+      - name: Quality gate (ruff check, ruff format --check, ty check, pytest)
+        run: ./scripts/gate.sh
