@@ -5,38 +5,20 @@ on:
     branches: [main]
   pull_request:
 
-# Least privilege: this job only reads the repo to lint/type/test.
 permissions:
   contents: read
 
-# Cancel superseded runs for the same ref on PRs (each push otherwise spins a
-# fresh, slot-contended macOS runner); let push-to-main runs finish.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
   check:
-    # Apple Silicon — REQUIRED: uv.lock pins mlx/mlx-metal to sys_platform == 'darwin',
-    # and streamlit_app.py imports mlx at module top, so a Linux runner can't even
-    # collect the tests. macOS runners are free for public repos.
+    # Apple Silicon is required: uv.lock pins mlx/mlx-metal to
+    # sys_platform == 'darwin' and streamlit_app.py imports mlx at module top,
+    # so a Linux runner can't even collect the tests.
     runs-on: macos-14
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v6
         with:
-          enable-cache: true # caches the uv cache dir, keyed on uv.lock
-
-      - name: Install dependencies
-        run: uv sync --locked # honors .python-version (3.12); fails if the lock is stale
-
-      # The four gates live in scripts/gate.sh so CI and the Claude Code Stop
-      # hook run the same thing; TestHooksConfig asserts both still call it and
-      # that it still runs all four. The script reports every failing gate in
-      # one pass rather than stopping at the first, so a red run names
-      # everything that needs fixing.
-      - name: Quality gate (ruff check, ruff format --check, ty check, pytest)
-        run: ./scripts/gate.sh
+          enable-cache: true
+      - run: uv sync --locked
+      - run: ./scripts/gate.sh
