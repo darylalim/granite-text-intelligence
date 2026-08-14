@@ -703,19 +703,27 @@ class TestCIWorkflow:
         assert self.WORKFLOW.is_file()
         self._workflow()  # raises yaml.YAMLError on a syntax error
 
+    # The Apple Silicon runner labels GitHub currently supports. An allow-list
+    # rather than the `major >= 14` floor this replaces, which was satisfiable by
+    # two separate broken states: it stayed green on `macos-14` right through that
+    # image's deprecation (brownout failures from 2026-10-05, retired 2026-11-02),
+    # and it admits the x64 `macos-*-intel` / `macos-*-large` labels, where the
+    # arm64-only mlx wheels don't install at all. GitHub keeps only the latest two
+    # OS versions, so the valid set is a moving window: when an image is deprecated
+    # (actions/runner-images issues), move this list forward — don't widen it back
+    # into a floor, which is what let a retiring runner pass unnoticed.
+    APPLE_SILICON_RUNNERS = frozenset({"macos-latest", "macos-15", "macos-26"})
+
     def test_runs_on_apple_silicon(self) -> None:
         # Load-bearing: uv.lock pins mlx/mlx-metal to sys_platform == 'darwin' and
         # streamlit_app.py imports mlx at module top, so a Linux runner can't even
         # collect the tests. But `sys_platform == 'darwin'` is true on Intel macOS
-        # too, where the arm64-only mlx wheels won't install — so macos-13 and
-        # earlier (Intel) would break `uv sync` while a bare startswith("macos")
-        # stayed green. Require Apple Silicon: macos-14+ (or the macos-latest alias,
-        # currently arm64).
+        # too, where the arm64-only mlx wheels won't install.
         runs_on = self._workflow()["jobs"]["check"]["runs-on"]
-        assert runs_on.startswith("macos"), runs_on
-        if runs_on != "macos-latest":
-            major = int(runs_on.removeprefix("macos-").split("-")[0])
-            assert major >= 14, runs_on
+        assert runs_on in self.APPLE_SILICON_RUNNERS, (
+            f"{runs_on!r} is not a supported Apple Silicon runner label; expected "
+            f"one of {sorted(self.APPLE_SILICON_RUNNERS)}"
+        )
 
     def test_delegates_to_the_shared_quality_gate(self) -> None:
         # The four commands documented in CLAUDE.md / README "Development" live in

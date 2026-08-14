@@ -12,8 +12,10 @@ jobs:
   check:
     # Apple Silicon is required: uv.lock pins mlx/mlx-metal to
     # sys_platform == 'darwin' and streamlit_app.py imports mlx at module top,
-    # so a Linux runner can't even collect the tests.
-    runs-on: macos-14
+    # so a Linux runner can't even collect the tests — nor can the x64
+    # macos-*-intel / macos-*-large labels. TestCIWorkflow allow-lists the
+    # arm64 labels GitHub currently supports; it is a moving window, not a floor.
+    runs-on: macos-26
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
