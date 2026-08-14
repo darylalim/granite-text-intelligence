@@ -19,10 +19,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      # Full version, not @v10: setup-uv stopped publishing major/minor tags at
-      # v8 (citing the tj-actions supply-chain attack), so @v10 does not exist.
+      # Full version, not @v10: setup-uv publishes no major or minor tags from v8
+      # on, so @v10 does not resolve. Caching is left at the default `auto` — on
+      # for push/pull_request, off for the events where a fork could poison it.
       - uses: astral-sh/setup-uv@v10.0.0
-        with:
-          enable-cache: true
       - run: uv sync --locked
       - run: ./scripts/gate.sh
