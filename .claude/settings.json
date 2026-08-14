@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py|*.md) ;; *) exit 0;; esac; o=$(uv run ruff format \"$f\" 2>&1) || { printf 'ruff format: %s\\n' \"${o:-failed with no output}\" >&2; exit 2; }; case \"$f\" in *.py) o=$(uv run ruff check --fix \"$f\" 2>&1) || { printf 'ruff check: %s\\n' \"${o:-failed with no output}\" >&2; exit 2; };; esac"
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.py|*.md) ;; *) exit 0;; esac; rc=0; case \"$f\" in *.py) o=$(uv run ruff check --fix \"$f\" 2>&1) || { printf 'ruff check: %s\\n' \"${o:-failed with no output}\" >&2; rc=2; };; esac; o=$(uv run ruff format \"$f\" 2>&1) || { printf 'ruff format: %s\\n' \"${o:-failed with no output}\" >&2; rc=2; }; exit $rc"
           }
         ]
       }

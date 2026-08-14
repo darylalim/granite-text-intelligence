@@ -1,7 +1,7 @@
+import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import tomllib
 from collections.abc import Iterator
@@ -758,6 +758,63 @@ class TestCIWorkflow:
         assert "pull_request" in triggers
 
 
+# Stub executables for the subprocess-driven suites below (TestReleaseWorkflow,
+# TestHooksConfig). Behavior is driven entirely by $STUB_* environment variables
+# so the files themselves never change — see the `stub_bin` fixture for why that
+# matters. Every variable is always set by the helpers; an unset one would make
+# `exit ""` a shell error rather than a readable test failure.
+_STUB_SOURCES = {
+    "gh": """#!/bin/sh
+printf '%s\\n' "gh $*" >>"$STUB_LOG"
+case "$*" in
+"api "*) printf '%s\\n' "$STUB_PROBE_ERROR" >&2; exit "$STUB_PROBE_EXIT" ;;
+"release list"*) printf '%s' "$STUB_DRAFT"; exit "$STUB_LIST_EXIT" ;;
+"release create "*) exit "$STUB_CREATE_EXIT" ;;
+"release edit "*) exit "$STUB_EDIT_EXIT" ;;
+esac
+exit 0
+""",
+    "uv": """#!/bin/sh
+printf '%s\\n' "uv $*" >>"$STUB_LOG"
+[ -n "$STUB_UV_OUTPUT" ] && printf '%s\\n' "$STUB_UV_OUTPUT"
+exit "$STUB_UV_EXIT"
+""",
+}
+
+
+@pytest.fixture(scope="session")
+def stub_bin(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The stub executables, written — and so scanned — once per session.
+
+    macOS scans every *newly created* executable the first time it runs. Measured
+    on this machine: 241 ms for a freshly written script against 4 ms to re-run
+    one already scanned, or to run it through a fresh symlink. Writing throwaway
+    `gh`/`uv` stubs per test made that the dominant cost of the entire suite —
+    ~17 s of a 21 s gate, none of it the tests' own logic, and paid again on
+    every Stop hook.
+
+    So the stubs are written once and varied through the environment rather than
+    by regenerating their source. Tests still get a private bin directory and
+    symlink in only the tools that case wants, which keeps `omit=` honest: a tool
+    left out is genuinely unreachable, not merely unstubbed.
+    """
+    bin_dir = tmp_path_factory.mktemp("stubs")
+    for tool, source in _STUB_SOURCES.items():
+        stub = bin_dir / tool
+        stub.write_text(source, encoding="utf-8")
+        stub.chmod(0o755)
+    return bin_dir
+
+
+def _link_stubs(bin_dir: Path, stub_bin: Path, *tools: str) -> None:
+    """Symlink the named stubs into a test's private bin directory."""
+    bin_dir.mkdir(exist_ok=True)
+    for tool in tools:
+        link = bin_dir / tool
+        if not link.exists():  # the memo cases run the same repo twice
+            link.symlink_to(stub_bin / tool)
+
+
 class TestReleaseWorkflow:
     """Auto-tag-and-publish ships in .github/workflows/ci.yml + scripts/release.sh.
 
@@ -772,6 +829,13 @@ class TestReleaseWorkflow:
     ROOT = Path(__file__).parent.parent
     WORKFLOW = CI_WORKFLOW
     SCRIPT = ROOT / "scripts" / "release.sh"
+    _stub_bin: Path
+
+    @pytest.fixture(autouse=True)
+    def _use_stub_bin(self, stub_bin: Path) -> None:
+        # Autouse so the 21 test signatures below stay about the release logic
+        # rather than carrying a fixture they only forward to the helper.
+        self._stub_bin = stub_bin
 
     def _workflow(self) -> dict:
         return _load_ci_workflow()
@@ -894,39 +958,35 @@ class TestReleaseWorkflow:
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
         scripts = tmp_path / "scripts"
         scripts.mkdir()
-        shutil.copy2(self.SCRIPT, scripts / "release.sh")
+        # Symlinked, not copied: a copy is a brand-new executable and costs a
+        # ~240 ms scan on macOS (see `stub_bin`). The script still resolves the
+        # throwaway repo, since it locates its root from the *working directory*
+        # via `git rev-parse --show-toplevel`, and its `dirname $0` fallback is
+        # pure string work that lands in tmp_path either way.
+        (scripts / "release.sh").symlink_to(self.SCRIPT)
 
         log = tmp_path / "calls.log"
         bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
-
-        # Dispatches on the subcommand to fake each outcome. `release list` emits
-        # one draft tag per line, matching the --jq the script asks for.
-        stubs = {
-            "gh": (
-                'case "$*" in\n'
-                f"\"api \"*) printf '%s\\n' '{probe_error}' >&2; exit {0 if tag_exists else 1} ;;\n"
-                f"\"release list\"*) printf '%s' '{f'v{version}' if existing_draft else ''}'; exit {list_exit} ;;\n"
-                f'"release create "*) exit {create_exit} ;;\n'
-                f'"release edit "*) exit {edit_exit} ;;\n'
-                "esac\n"
-            ),
-            "uv": f"printf '%s\\n' '{version}'\nexit {uv_exit}\n",
-        }
-        for tool, body in stubs.items():
-            if tool == omit:
-                continue
-            stub = bin_dir / tool
-            stub.write_text(
-                f"#!/bin/sh\nprintf '%s\\n' \"{tool} $*\" >>'{log}'\n{body}exit 0\n",
-                encoding="utf-8",
-            )
-            stub.chmod(0o755)
+        _link_stubs(bin_dir, self._stub_bin, *(t for t in _STUB_SOURCES if t != omit))
 
         # A stubbed-out tool has to be unreachable, not merely unstubbed, so the
         # PATH drops everything but the stubs and the system tools git needs.
         path = f"{bin_dir}" if omit else f"{bin_dir}:{os.environ['PATH']}"
-        env: dict[str, str] = {**os.environ, "PATH": f"{path}:/usr/bin:/bin"}
+        # The stubs dispatch on these rather than on regenerated source. `release
+        # list` emits one draft tag per line, matching the --jq the script asks for.
+        env: dict[str, str] = {
+            **os.environ,
+            "PATH": f"{path}:/usr/bin:/bin",
+            "STUB_LOG": str(log),
+            "STUB_PROBE_ERROR": probe_error,
+            "STUB_PROBE_EXIT": "0" if tag_exists else "1",
+            "STUB_DRAFT": f"v{version}" if existing_draft else "",
+            "STUB_LIST_EXIT": str(list_exit),
+            "STUB_CREATE_EXIT": str(create_exit),
+            "STUB_EDIT_EXIT": str(edit_exit),
+            "STUB_UV_OUTPUT": version,
+            "STUB_UV_EXIT": str(uv_exit),
+        }
         env.pop("GITHUB_SHA", None)
         env.pop("GITHUB_ACTIONS", None)
         if sha is not None:
@@ -1140,6 +1200,11 @@ class TestHooksConfig:
     ROOT = Path(__file__).parent.parent
     SETTINGS = ROOT / ".claude" / "settings.json"
     GATE = ROOT / "scripts" / "gate.sh"
+    _stub_bin: Path
+
+    @pytest.fixture(autouse=True)
+    def _use_stub_bin(self, stub_bin: Path) -> None:
+        self._stub_bin = stub_bin
 
     def _settings(self) -> dict:
         return json.loads(self.SETTINGS.read_text(encoding="utf-8"))
@@ -1175,7 +1240,11 @@ class TestHooksConfig:
             assert command in gate, f"missing gate: {command!r}"
 
     def _run_gate(
-        self, tmp_path: Path, uv_exit: int, uv_output: str = "DIAGNOSTIC"
+        self,
+        tmp_path: Path,
+        uv_exit: int,
+        uv_output: str = "DIAGNOSTIC",
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run gate.sh in a throwaway repo with `uv` stubbed to a fixed outcome.
 
@@ -1186,26 +1255,40 @@ class TestHooksConfig:
         assertion). Executing it is the only way these invariants can actually
         fail. The stub also keeps the test hermetic and instant: the real gate
         would run the suite recursively.
+
+        Idempotent, so the memo cases below can call it twice against the same
+        throwaway repo and watch the second run decide whether to skip.
         """
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
         scripts = tmp_path / "scripts"
-        scripts.mkdir()
-        shutil.copy2(self.GATE, scripts / "gate.sh")
+        scripts.mkdir(exist_ok=True)
+        # Symlinked rather than copied, and the stub is shared — both to avoid
+        # macOS re-scanning a newly created executable. See `stub_bin`.
+        gate = scripts / "gate.sh"
+        if not gate.exists():
+            gate.symlink_to(self.GATE)
 
         bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
-        stub = bin_dir / "uv"
-        emit = f"printf '%s\\n' '{uv_output}'\n" if uv_output else ""
-        stub.write_text(f"#!/bin/sh\n{emit}exit {uv_exit}\n", encoding="utf-8")
-        stub.chmod(0o755)
+        _link_stubs(bin_dir, self._stub_bin, "uv")
 
         return subprocess.run(
-            [str(scripts / "gate.sh")],
+            [str(gate)],
             cwd=tmp_path,
             capture_output=True,
             text=True,
             check=False,  # a non-zero exit is the thing under test
-            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+            env={
+                **os.environ,
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                "STUB_LOG": str(tmp_path / "calls.log"),
+                "STUB_UV_OUTPUT": uv_output,
+                "STUB_UV_EXIT": str(uv_exit),
+                # The real environment may carry either of these; the memo cases
+                # set them deliberately, so neutralise them for everyone else.
+                "GITHUB_ACTIONS": "",
+                "GATE_FORCE": "",
+                **(extra_env or {}),
+            },
         )
 
     def test_gate_blocks_with_exit_2(self, tmp_path: Path) -> None:
@@ -1240,6 +1323,56 @@ class TestHooksConfig:
         assert result.returncode == 2
         assert "no output" in result.stderr
 
+    def test_gate_skips_a_tree_that_already_passed(self, tmp_path: Path) -> None:
+        # The memo's whole purpose: a turn that changed nothing costs ~0.09s
+        # instead of the full gate. It is the only skip the gate permits.
+        first = self._run_gate(tmp_path, uv_exit=0)
+        assert "all passed" in first.stdout
+        second = self._run_gate(tmp_path, uv_exit=0)
+        assert second.returncode == 0
+        assert "skipped" in second.stdout
+
+    def test_gate_reruns_when_a_source_file_changes(self, tmp_path: Path) -> None:
+        self._run_gate(tmp_path, uv_exit=0)
+        (tmp_path / "added.py").write_text("x = 1\n", encoding="utf-8")
+        result = self._run_gate(tmp_path, uv_exit=0)
+        assert "skipped" not in result.stdout, "skipped a tree that had changed"
+        assert "all passed" in result.stdout
+
+    def test_gate_records_nothing_on_a_red_run(self, tmp_path: Path) -> None:
+        # Memoizing a failure would reproduce the `stop_hook_active` bug exactly:
+        # block once, then wave the still-broken tree through on the next Stop.
+        assert self._run_gate(tmp_path, uv_exit=1).returncode == 2
+        second = self._run_gate(tmp_path, uv_exit=1)
+        assert second.returncode == 2, "a red gate was memoized as passing"
+        assert "skipped" not in second.stdout
+
+    @pytest.mark.parametrize("override", ["GITHUB_ACTIONS", "GATE_FORCE"])
+    def test_gate_never_skips_when_overridden(
+        self, tmp_path: Path, override: str
+    ) -> None:
+        # CI must always run the real thing. A fresh checkout has no memo, but
+        # caching the workspace would restore one, so this is explicit rather
+        # than inherited from how the runner happens to be configured.
+        self._run_gate(tmp_path, uv_exit=0)
+        result = self._run_gate(tmp_path, uv_exit=0, extra_env={override: "1"})
+        assert "skipped" not in result.stdout, f"{override} did not force a run"
+        assert "all passed" in result.stdout
+
+    def test_gate_runs_when_the_fingerprint_is_uncomputable(
+        self, tmp_path: Path
+    ) -> None:
+        # Hashing an empty file list yields e3b0c442… — stable and *non-empty* —
+        # so letting it stand in for an answer would let it match a stored memo
+        # and disable the gate silently. An unlistable tree is a refusal.
+        self._run_gate(tmp_path, uv_exit=0)
+        (tmp_path / ".gitignore").write_text("*\n", encoding="utf-8")
+        memo = tmp_path / ".git" / "gate-ok"
+        memo.write_text(hashlib.sha256(b"").hexdigest() + "\n", encoding="utf-8")
+        result = self._run_gate(tmp_path, uv_exit=0)
+        assert "skipped" not in result.stdout, "the empty-input hash was trusted"
+        assert "all passed" in result.stdout
+
     def test_stop_hook_delegates_to_the_gate_script(self) -> None:
         # Inlining the chain back into settings.json would put it beyond the reach
         # of every assertion above: a JSON-escaped one-liner cannot be run, linted
@@ -1261,12 +1394,90 @@ class TestHooksConfig:
 
     def test_format_hook_covers_python_and_markdown(self) -> None:
         # ruff >= 0.16 formats python fences inside Markdown and CI's
-        # `ruff format --check .` reaches CLAUDE.md, so .md needs the same
-        # exit-2 contract .py gets or its failures vanish.
+        # `ruff format --check .` reaches CLAUDE.md, so .md is in scope too. The
+        # exit-2 contract both extensions owe is asserted behaviorally below,
+        # not as a substring: the hook spells its failure exit as `rc=2` in two
+        # branches and `exit $rc` once, so no `exit 2` literal survives to match.
         post = self._commands("PostToolUse")
         assert "*.py" in post
         assert "*.md" in post
-        assert "exit 2" in post
+
+    def _run_format_hook(
+        self, tmp_path: Path, file_name: str, uv_exit: int = 0
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        """Run the PostToolUse command with `uv` stubbed to a logging dispatcher.
+
+        Source assertions cannot see *order*, and order is the whole invariant:
+        both `ruff check --fix` and `ruff format` appear in the command under
+        either arrangement, so only executing it distinguishes them. Logging
+        argv is what makes `check < format` assertable at all. The stub also
+        keeps this hermetic — the real hook shells out to uv twice per case.
+        """
+        bin_dir = tmp_path / "bin"
+        _link_stubs(bin_dir, self._stub_bin, "uv")
+        log = tmp_path / "uv.log"
+
+        result = subprocess.run(
+            ["sh", "-c", self._commands("PostToolUse")],
+            input=json.dumps({"tool_input": {"file_path": str(tmp_path / file_name)}}),
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,  # a non-zero exit is the thing under test
+            env={
+                **os.environ,
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                "STUB_LOG": str(log),
+                "STUB_UV_OUTPUT": "",
+                "STUB_UV_EXIT": str(uv_exit),
+            },
+        )
+        calls = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
+        return result, calls
+
+    def test_format_hook_lints_before_formatting(self, tmp_path: Path) -> None:
+        # ruff's own documented order, and it is load-bearing rather than
+        # stylistic: `ruff check --fix` can *produce* unformatted code — deleting
+        # a module's last import strands the two blank lines that followed it —
+        # and the formatter is what removes them. Format first and that fix lands
+        # after the last pass that would have tidied it, so the Stop gate fails
+        # `ruff format --check` on a file this hook just exited 0 on. Verified
+        # against ruff 0.16.2: format-then-fix leaves "\n\ndef f():".
+        _, calls = self._run_format_hook(tmp_path, "mod.py")
+        assert len(calls) == 2, f"expected lint then format, got {calls}"
+        assert calls[0].startswith("uv run ruff check --fix "), calls
+        assert calls[1].startswith("uv run ruff format "), calls
+
+    def test_format_hook_formats_even_when_lint_fails(self, tmp_path: Path) -> None:
+        # Putting the linter first must not let an unfixable lint error skip the
+        # formatter: that would block *and* leave the file badly formatted, so
+        # the Stop gate reports a second failure this hook could have removed.
+        # Same rule gate.sh follows — one report naming everything that is wrong.
+        result, calls = self._run_format_hook(tmp_path, "mod.py", uv_exit=1)
+        assert len(calls) == 2, f"formatter skipped after a lint failure: {calls}"
+        assert result.returncode == 2
+        assert "ruff check:" in result.stderr
+        assert "ruff format:" in result.stderr
+
+    def test_format_hook_lints_python_only(self, tmp_path: Path) -> None:
+        # `ruff check` on Markdown reports "No Python files found" and exits 0;
+        # formatting is the half that reaches doc snippets.
+        _, calls = self._run_format_hook(tmp_path, "doc.md")
+        assert len(calls) == 1, f"expected format only, got {calls}"
+        assert calls[0].startswith("uv run ruff format "), calls
+
+    def test_format_hook_blocks_on_a_markdown_failure(self, tmp_path: Path) -> None:
+        # The .md branch owes the same exit-2 contract .py gets: PostToolUse
+        # cannot block the edit, so 2-with-stderr is the only way the diagnostic
+        # reaches Claude at all (ruff writes to stdout, and exit 1 is discarded).
+        result, _ = self._run_format_hook(tmp_path, "doc.md", uv_exit=1)
+        assert result.returncode == 2
+        assert "ruff format:" in result.stderr
+
+    def test_format_hook_ignores_other_extensions(self, tmp_path: Path) -> None:
+        result, calls = self._run_format_hook(tmp_path, "data.json")
+        assert calls == [], f"uv invoked for an unformattable file: {calls}"
+        assert result.returncode == 0
 
     def test_secret_guard_covers_env_lockfile_and_secrets(self) -> None:
         # An accident guardrail, not a security boundary: it matches Edit/Write/
