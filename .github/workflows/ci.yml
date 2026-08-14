@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only by default so the `check` job — the one that runs code from a fork's
+# pull request — cannot write anything. `release` widens its own scope instead.
 permissions:
   contents: read
 
@@ -25,3 +27,35 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.0
       - run: uv sync --locked
       - run: ./scripts/gate.sh
+
+  # Tags and publishes a GitHub release whenever pyproject.toml's version has no
+  # tag yet; a no-op on every other push. The logic lives in scripts/release.sh
+  # for the same reason the gate does — a YAML-escaped one-liner cannot be run or
+  # tested, and this one has failure modes worth testing.
+  release:
+    # `needs` keeps a tag from ever pointing at a red build; the `if` keeps a
+    # fork's pull request from releasing anything, and confines it to main.
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Not the Apple Silicon runner `check` requires: this job reads a TOML field
+    # and calls the GitHub API, and never imports the darwin-only mlx.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The only job granted write access, and only to contents (tags + releases).
+    permissions:
+      contents: write
+    # Two pushes to main in quick succession would otherwise race for the same
+    # tag. Never cancelled: a half-run release is the state being avoided here.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.0
+      - run: ./scripts/release.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Names the repository outright rather than leaving gh to infer it from
+          # the checkout's git remote. Unset outside Actions, where that inference
+          # is what you want.
+          GH_REPO: ${{ github.repository }}

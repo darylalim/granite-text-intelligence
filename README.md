@@ -90,6 +90,19 @@ These four checks also run in CI on every push to `main` and pull request (see t
 
 Contributions are welcome — open an issue or PR. Before submitting, run the four checks above (or rely on the project's Claude Code hooks, which run them on edit and on stop) so CI stays green.
 
+### Releases
+
+Releases are cut by CI, not by hand:
+
+```bash
+# edit pyproject.toml: version = "0.2.0"
+uv lock          # required — uv.lock records the project's own version
+```
+
+Commit **both files** to `main` and, once the checks above pass, the workflow tags `v<version>` and publishes a [release](https://github.com/darylalim/granite-text-intelligence/releases) with auto-generated notes. Pushes that don't change the version are a no-op, and a release is never cut from a failing build or from a pull request.
+
+Committing `pyproject.toml` alone fails CI at `uv sync --locked`, which cuts no release — so it reads as the automation having stopped rather than as a stale lockfile.
+
 ## License
 
 This project's code is released under the [Apache License 2.0](LICENSE). The IBM Granite model it loads is distributed separately under [its own Apache 2.0 license](https://huggingface.co/ibm-granite/granite-4.1-8b) and is downloaded at runtime, not included in this repository.
