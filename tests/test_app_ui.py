@@ -108,6 +108,39 @@ class TestUIPolish:
         assert at.button(key="run").icon == ":material/play_arrow:"
 
 
+class TestResultsPanelStructure:
+    """The results panel's emission order, which nothing else pins.
+
+    Both properties degrade silently if someone moves the run block back above
+    the tabs: the tab block returns to a shifting delta path (remounting and
+    resetting the selected tab whenever a notice appears or disappears), and
+    the notices stop clearing at the top of a rerun, so a stale "Inputs changed
+    since this run" note stays readable for the length of the next run.
+    """
+
+    @staticmethod
+    def _results_column(at: AppTest):
+        """The column holding the result tabs (the input tabs sit above it)."""
+        for block in at.main.children.values():
+            for column in getattr(block, "children", {}).values():
+                kinds = [
+                    getattr(child, "type", "")
+                    for child in getattr(column, "children", {}).values()
+                ]
+                if "tab_container" in kinds:
+                    return column
+        raise AssertionError("results column not found")
+
+    def test_slots_are_reserved_before_the_tabs(self) -> None:
+        at = AppTest.from_file(APP).run()
+        column = self._results_column(at)
+        kinds = [child.type for child in column.children.values()]
+        # status slot, notice slot, then the tabs — the tabs must come last of
+        # the three so their index cannot shift, and the notice slot must be an
+        # `empty` (a container would preserve the previous run's note).
+        assert kinds == ["flex_container", "empty", "tab_container"]
+
+
 class TestRunInteraction:
     """The Run path and results panel — model mocked at the mlx_lm boundary."""
 
