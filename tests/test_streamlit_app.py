@@ -616,20 +616,25 @@ class TestThemeConfig:
     CONFIG = Path(__file__).parent.parent / ".streamlit" / "config.toml"
 
     def test_ships_no_custom_theme(self) -> None:
-        # Streamlit's light/dark toggle is only offered when both modes exist.
-        # A *lone* [theme] block — one with no [theme.light]/[theme.dark] beside
-        # it — locks the app to a single mode and drops the toggle from the
-        # settings menu with no error, so declaring no theme at all is what
-        # keeps both built-ins selectable. The invariant is therefore the
-        # absence of the section, not of the file: config.toml may legitimately
-        # come back for non-theme options (server, logging, client).
+        # This is deliberately broader than the mechanical hazard, and the gap
+        # is worth naming. The hazard is a *lone* [theme] block — one with no
+        # [theme.light]/[theme.dark] beside it — which locks the app to a
+        # single mode and drops the appearance toggle with no error. A correct
+        # two-mode custom theme would keep the toggle and is still rejected
+        # here: shipping the built-ins is a product decision, not a workaround,
+        # so any [theme] section fails and reinstating one is a call to make
+        # deliberately rather than a diff that slips past a narrower test.
+        # The invariant is the absence of the *section*, not of the file:
+        # config.toml may legitimately come back for non-theme options
+        # (server, logging, client).
         config: dict = {}
         if self.CONFIG.is_file():
             with self.CONFIG.open("rb") as handle:
                 config = tomllib.load(handle)
         assert "theme" not in config, (
-            f"{self.CONFIG.name} defines a custom theme; this app uses "
-            "Streamlit's built-in light and dark themes"
+            f"{self.CONFIG} defines a custom theme. This app ships Streamlit's "
+            "built-in light and dark themes by decision, so any [theme] section "
+            "fails here, two-mode ones included — see CLAUDE.md, Configuration."
         )
 
     def test_sentiment_colors_are_builtin_names(self) -> None:
