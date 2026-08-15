@@ -397,10 +397,12 @@ def _render_confidence(parsed: dict[str, Any]) -> None:
 
 
 # Color the sentiment metric value by its enum, via Streamlit's `:color[…]`
-# markdown (which reads the theme's greenColor/redColor/grayColor/orangeColor).
-# The sentiment enum is fixed by the JSON schema and stays English, so this
-# mapping is stable; orange (not the low-contrast yellow) is used for "mixed".
-# Any out-of-enum label falls through to an uncolored value.
+# markdown. Only Streamlit's built-in color names resolve here — an unrecognized
+# one renders as literal text rather than raising, so TestThemeConfig pins these
+# four against Streamlit's own set. The sentiment enum is fixed by the JSON
+# schema and stays English, so this mapping is stable; orange (not the
+# low-contrast yellow) is used for "mixed". Any out-of-enum label falls through
+# to an uncolored value.
 _SENTIMENT_COLOR = {
     "positive": "green",
     "negative": "red",

@@ -74,7 +74,7 @@ MAX_INPUT_TOKENS=32768 uv run streamlit run streamlit_app.py
 - **Four analyses** — summarization (prose), plus topic detection, intent recognition, and sentiment (structured JSON), each a task-specific Granite prompt
 - **Per-feature toggles** — run exactly the analyses you want; each description lives in the toggle's tooltip
 - **Tabbed results** — readable per-feature views plus a combined JSON view
-- **IBM Carbon-inspired UI** — IBM Plex fonts and an IBM Blue accent, with light/dark mode and Material Symbol icons throughout
+- **Native Streamlit UI** — the built-in light and dark themes, switchable from the settings menu, with Material Symbol icons throughout
 - **Local and private** — runs entirely on-device via MLX; no text leaves your Mac
 
 ## Development

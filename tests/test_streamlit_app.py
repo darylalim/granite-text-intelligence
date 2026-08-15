@@ -1,10 +1,8 @@
 import hashlib
 import json
 import os
-import re
 import subprocess
 import tomllib
-from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -606,101 +604,48 @@ class TestEffectiveMaxTokens:
         assert _effective_max_tokens(feature, language) == feature["max_tokens"] * 2
 
 
-def _flatten_theme_items(
-    table: dict, prefix: str = "theme"
-) -> Iterator[tuple[str, object]]:
-    """Yield (dotted option key, leaf value) pairs for a parsed [theme] table,
-    recursing into the light/dark sub-tables (e.g. ("theme.light.primaryColor",
-    "#0f62fe"))."""
-    for name, value in table.items():
-        key = f"{prefix}.{name}"
-        if isinstance(value, dict):
-            yield from _flatten_theme_items(value, key)
-        else:
-            yield key, value
-
-
-def _flatten_theme_keys(table: dict, prefix: str = "theme") -> Iterator[str]:
-    """The dotted option keys of a parsed [theme] table (see _flatten_theme_items)."""
-    return (key for key, _ in _flatten_theme_items(table, prefix))
-
-
 class TestThemeConfig:
-    """The IBM Carbon-inspired theme ships in .streamlit/config.toml.
+    """The app ships **no** custom theme; it uses Streamlit's built-in light and
+    dark themes.
 
-    Streamlit only *warns* on a malformed theme — it never raises — so a typo or
-    a dropped section would silently disable styling without any test noticing.
-    These assertions make that failure mode visible.
+    Theme faults are invisible at runtime — Streamlit only *warns* on a bad
+    theme, it never raises — so the two that survive the move to the built-ins
+    are pinned here. Neither has any other guard.
     """
 
     CONFIG = Path(__file__).parent.parent / ".streamlit" / "config.toml"
 
-    def _theme(self) -> dict:
-        with self.CONFIG.open("rb") as handle:
-            return tomllib.load(handle)["theme"]
+    def test_ships_no_custom_theme(self) -> None:
+        # Streamlit's light/dark toggle is only offered when both modes exist.
+        # A *lone* [theme] block — one with no [theme.light]/[theme.dark] beside
+        # it — locks the app to a single mode and drops the toggle from the
+        # settings menu with no error, so declaring no theme at all is what
+        # keeps both built-ins selectable. The invariant is therefore the
+        # absence of the section, not of the file: config.toml may legitimately
+        # come back for non-theme options (server, logging, client).
+        config: dict = {}
+        if self.CONFIG.is_file():
+            with self.CONFIG.open("rb") as handle:
+                config = tomllib.load(handle)
+        assert "theme" not in config, (
+            f"{self.CONFIG.name} defines a custom theme; this app uses "
+            "Streamlit's built-in light and dark themes"
+        )
 
-    def test_config_exists_and_parses(self) -> None:
-        assert self.CONFIG.is_file()
-        with self.CONFIG.open("rb") as handle:
-            tomllib.load(handle)  # raises TOMLDecodeError on a syntax error
-
-    def test_defines_light_and_dark_modes(self) -> None:
-        # Both sections must exist for the in-app light/dark toggle to appear.
-        theme = self._theme()
-        assert "light" in theme
-        assert "dark" in theme
-
-    def test_uses_ibm_blue_primary(self) -> None:
-        # IBM Blue 60 — the on-brand accent the whole theme is built around.
-        theme = self._theme()
-        assert theme["light"]["primaryColor"] == "#0f62fe"
-        assert theme["dark"]["primaryColor"] == "#0f62fe"
-
-    def test_loads_ibm_plex_fonts(self) -> None:
-        theme = self._theme()
-        assert "IBM Plex Sans" in theme["font"]
-        assert "IBM Plex Mono" in theme["codeFont"]
-
-    def test_only_recognized_theme_keys(self) -> None:
-        # Streamlit silently ignores unrecognized theme keys (it warns, never
-        # raises), so a mis-cased key like `backgroundcolor` would disable that
-        # style with no error and no failing test. Cross-check every key — incl.
-        # the light/dark sub-tables — against Streamlit's own option registry so a
-        # typo or future drift fails loudly here instead of going unnoticed.
-        import streamlit.config
-
-        recognized = set(streamlit.config.get_config_options())
-        unknown = [
-            key for key in _flatten_theme_keys(self._theme()) if key not in recognized
-        ]
-        assert not unknown, f"unrecognized theme keys: {unknown}"
-
-    def test_color_values_are_six_digit_hex(self) -> None:
-        # Streamlit doesn't validate color *values* either — a dropped "#" or
-        # digit passes the key check yet silently disables that color, the same
-        # failure mode as a mis-cased key. Enforce this project's 6-digit-hex
-        # house style on every single-string *Color value (list-valued chart
-        # color keys, if ever added, are skipped by the str guard).
-        malformed = [
-            f"{key}={value!r}"
-            for key, value in _flatten_theme_items(self._theme())
-            if key.endswith("Color")
-            and isinstance(value, str)
-            and not re.fullmatch(r"#[0-9a-fA-F]{6}", value)
-        ]
-        assert not malformed, f"malformed hex color values: {malformed}"
-
-    def test_sentiment_colors_are_tuned_in_both_modes(self) -> None:
+    def test_sentiment_colors_are_builtin_names(self) -> None:
         # render_result colors the sentiment metric via `:color[...]` markdown,
-        # which reads the theme's `<color>Color` keys. Every color the app emits
-        # must be tuned in BOTH modes, else that sentiment falls back to
-        # Streamlit's default hue — the orange-vs-yellow gap this guards against
-        # (the code emitted `:orange[...]` while only yellowColor was defined).
-        theme = self._theme()
-        for color in sorted(set(_SENTIMENT_COLOR.values())):
-            key = f"{color}Color"
-            assert key in theme["light"], f"{key} missing from [theme.light]"
-            assert key in theme["dark"], f"{key} missing from [theme.dark]"
+        # which resolves only Streamlit's built-in color names. An unrecognized
+        # name is not an error — the markdown renders literally, shipping
+        # ":teal[positive]" to the user as visible punctuation. The custom theme
+        # this replaced covered the names by cross-checking its own
+        # `<color>Color` keys; the built-in themes define every recognized name
+        # in both modes, so the name itself is all that is left to get wrong.
+        # Checked against Streamlit's own set, so an upstream rename fails
+        # loudly here rather than silently narrowing what this accepts.
+        from streamlit.elements.lib.color_util import BUILTIN_COLOR_NAMES
+
+        unknown = sorted(set(_SENTIMENT_COLOR.values()) - BUILTIN_COLOR_NAMES)
+        assert not unknown, f"not built-in Streamlit color names: {unknown}"
 
 
 CI_WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "ci.yml"
