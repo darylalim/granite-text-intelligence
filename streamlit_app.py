@@ -551,42 +551,18 @@ with features_column:
     )
 
 with results_column:
-    if run:
-        try:
-            with st.spinner("Loading model…"):
-                model, tokenizer = load_model()
-            text, was_truncated = truncate_to_tokens(input_text, tokenizer)
-            data: dict[str, Any] = {}
-            for feature in FEATURES:
-                if not enabled[feature["key"]]:
-                    continue
-                with st.spinner(f"Running {feature['label']}…"):
-                    data[feature["key"]] = run_feature(
-                        feature, text, model, tokenizer, language
-                    )
-            st.session_state.results = {
-                "order": [f["key"] for f in FEATURES if enabled[f["key"]]],
-                "data": data,
-                "truncated": was_truncated,
-                "signature": _run_signature(input_text, enabled, language),
-            }
-        except Exception as exc:  # noqa: BLE001 (top-level run guard)
-            st.exception(exc)
-
-    results = cast("dict[str, Any] | None", st.session_state.results)
-    if results is not None:
-        if results["truncated"]:
-            st.warning(
-                f"Input was truncated to the first {MAX_INPUT_TOKENS} tokens.",
-                icon=":material/content_cut:",
-            )
-        current_signature = _run_signature(input_text, enabled, language)
-        if results["signature"] != current_signature:
-            st.info(
-                "Inputs changed since this run — click Run to refresh.",
-                icon=":material/sync:",
-            )
-
+    # Claim this panel's slots *before* the run, and fill them after. Streamlit
+    # emits a delta as each st.* call executes and leaves the previous run's
+    # elements on screen — faded to ~33% once the run outruns a short delay —
+    # until the new run re-emits them. Creating the tabs after inference would
+    # therefore leave the whole panel stale for the length of a 5.2 GB model
+    # load plus up to four generations, including the now-actively-misleading
+    # "Inputs changed since this run" note. The spinners below do not repaint
+    # it: st.spinner enqueues on a *transient* cursor that never advances the
+    # real delta path. Containers accept content out of order, so the bodies
+    # below are unchanged — only the emission order is.
+    status_slot = st.container()
+    notice_slot = st.container()
     tabs = st.tabs(
         [
             ":material/data_object: JSON",
@@ -595,6 +571,44 @@ with results_column:
     )
     json_tab = tabs[0]
     feature_tabs = {feature["key"]: tab for feature, tab in zip(FEATURES, tabs[1:])}
+
+    if run:
+        with status_slot:
+            try:
+                with st.spinner("Loading model…"):
+                    model, tokenizer = load_model()
+                text, was_truncated = truncate_to_tokens(input_text, tokenizer)
+                data: dict[str, Any] = {}
+                for feature in FEATURES:
+                    if not enabled[feature["key"]]:
+                        continue
+                    with st.spinner(f"Running {feature['label']}…"):
+                        data[feature["key"]] = run_feature(
+                            feature, text, model, tokenizer, language
+                        )
+                st.session_state.results = {
+                    "order": [f["key"] for f in FEATURES if enabled[f["key"]]],
+                    "data": data,
+                    "truncated": was_truncated,
+                    "signature": _run_signature(input_text, enabled, language),
+                }
+            except Exception as exc:  # noqa: BLE001 (top-level run guard)
+                st.exception(exc)
+
+    results = cast("dict[str, Any] | None", st.session_state.results)
+    if results is not None:
+        with notice_slot:
+            if results["truncated"]:
+                st.warning(
+                    f"Input was truncated to the first {MAX_INPUT_TOKENS} tokens.",
+                    icon=":material/content_cut:",
+                )
+            current_signature = _run_signature(input_text, enabled, language)
+            if results["signature"] != current_signature:
+                st.info(
+                    "Inputs changed since this run — click Run to refresh.",
+                    icon=":material/sync:",
+                )
 
     with json_tab:
         if results is not None and results["data"]:
