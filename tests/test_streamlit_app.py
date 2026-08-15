@@ -156,6 +156,16 @@ class TestParseJsonOutput:
             pytest.param("not json at all", None, id="not-json"),
             pytest.param("{not: valid}", None, id="malformed-braces"),
             pytest.param("[1, 2, 3]", None, id="top-level-array"),
+            # An array of *objects* is not symmetrical with the scalar array
+            # above: the whole-string fast path returns only on a dict, so this
+            # falls through to the `{` scan and yields the first nested object.
+            # Deliberate leniency — it recovers a usable sentiment/intent object
+            # from a model that wrapped it in an array — at the cost of reducing
+            # a bare topics array to its first topic. Pinned so the asymmetry is
+            # a decision rather than a discovery.
+            pytest.param(
+                '[{"a": 1}, {"b": 2}]', {"a": 1}, id="first-object-inside-array"
+            ),
             pytest.param("true", None, id="scalar-bool"),
             pytest.param("42", None, id="scalar-int"),
             pytest.param('"hello"', None, id="scalar-string"),
@@ -306,6 +316,24 @@ class TestRunFeature:
         call_kwargs = mock_generate.call_args[1]
         assert call_kwargs["prompt"] == "PROMPT"
         assert call_kwargs["max_tokens"] == FEATURES[1]["max_tokens"]
+
+    @patch("streamlit_app.generate")
+    def test_passes_effective_budget_to_generate(
+        self, mock_generate: MagicMock, tokenizer: MagicMock
+    ) -> None:
+        # The case above pins the budget only under English — the one language
+        # where _effective_max_tokens returns the base value — so on its own it
+        # cannot tell `_effective_max_tokens(feature, language)` apart from a
+        # plain `feature["max_tokens"]`. TestEffectiveMaxTokens covers the
+        # doubling in isolation, but nothing covered the wire between them, and
+        # dropping it is precisely the mutation that truncates every non-English
+        # JSON object mid-parse.
+        mock_generate.return_value = "{}"
+        feature = FEATURES[3]
+
+        run_feature(feature, "hello", MagicMock(), tokenizer, language="German")
+
+        assert mock_generate.call_args[1]["max_tokens"] == feature["max_tokens"] * 2
 
     @patch("streamlit_app.generate")
     def test_language_directive_appended_to_user_turn(
@@ -1488,3 +1516,62 @@ class TestHooksConfig:
             assert pattern in pre, f"unguarded path: {pattern}"
         assert "*/.env.example" in pre
         assert "exit 2" in pre
+
+    def _run_secret_guard(self, path: str) -> subprocess.CompletedProcess[str]:
+        """Run the PreToolUse guard against a real payload.
+
+        The patterns are a shell `case`, and a substring assertion cannot see
+        which *forms* of a path a pattern covers: `*/secrets.toml` and a bare
+        `secrets.toml` read alike and behave differently — the guard shipped
+        matching only the former, so a relative `secrets.toml` passed. Only
+        executing it distinguishes them. It runs `jq` and echoes, touching
+        neither filesystem nor network, so it needs no stubbing.
+        """
+        hooks = [
+            hook["command"]
+            for matcher in self._settings()["hooks"]["PreToolUse"]
+            for hook in matcher["hooks"]
+        ]
+        assert len(hooks) == 1, (
+            "PreToolUse holds more than the secret guard; running them as one "
+            "script would hide the guard's exit status behind the last command"
+        )
+        return subprocess.run(
+            ["sh", "-c", hooks[0]],
+            input=json.dumps({"tool_input": {"file_path": path}}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @pytest.mark.parametrize(
+        "path, blocked",
+        [
+            pytest.param(".env", True, id="env-bare"),
+            pytest.param("/repo/.env", True, id="env-nested"),
+            pytest.param("/repo/.env.local", True, id="env-suffixed-nested"),
+            pytest.param(".env.local", True, id="env-suffixed-bare"),
+            pytest.param("secrets.toml", True, id="secrets-bare"),
+            pytest.param(".streamlit/secrets.toml", True, id="secrets-nested"),
+            pytest.param("uv.lock", True, id="lock-bare"),
+            pytest.param("/repo/uv.lock", True, id="lock-nested"),
+            pytest.param(".env.example", False, id="example-bare-exempt"),
+            pytest.param("/repo/.env.example", False, id="example-nested-exempt"),
+            pytest.param("streamlit_app.py", False, id="ordinary-file"),
+        ],
+    )
+    def test_secret_guard_blocks_every_form_of_a_guarded_path(
+        self, path: str, blocked: bool
+    ) -> None:
+        # Both the bare and nested form of each guarded name, because they are
+        # separate `case` patterns: uv.lock carried both from the start while
+        # secrets.toml carried only the nested one, and no static check could
+        # tell. Exit 2 is the contract — Claude Code blocks on 2 alone.
+        result = self._run_secret_guard(path)
+
+        if blocked:
+            assert result.returncode == 2, f"unguarded path: {path}"
+            assert "Blocked:" in result.stderr
+        else:
+            assert result.returncode == 0, f"wrongly blocked: {path}"
+            assert result.stderr == ""
