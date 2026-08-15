@@ -517,6 +517,27 @@ def _run_signature(
     return (input_text, tuple(enabled[f["key"]] for f in FEATURES), language)
 
 
+def _preview(text: str) -> None:
+    """Render read-only source text in a fixed-height scrolling container.
+
+    Deliberately *not* a `disabled=True` `st.text_area`, which is what shipped
+    until 2026-08-15: Streamlit styles a disabled textarea at `fadedText40` and
+    forces it through `-webkit-text-fill-color`, so the low contrast cannot be
+    styled back, and a disabled field reads as broken rather than read-only.
+    (It is *not* in the tab order — a `disabled` control, unlike `readOnly`, is
+    removed from sequential focus navigation. An earlier version of this
+    comment claimed otherwise.)
+
+    The trade-off is an accessible name: the textarea carried a collapsed
+    label and a bare container has none. Streamlit exposes no label on a
+    container and this app does not inject HTML, so the preview is named only
+    by the surrounding tab and its widget ("Upload a .txt or .md file",
+    "Pick a sample").
+    """
+    with st.container(height=150):
+        st.text(text, width="stretch")
+
+
 st.title("Granite Text Intelligence")
 
 # ---- Input: Text > Upload > Sample (first non-empty wins) ----
@@ -543,23 +564,14 @@ with upload_tab:
         uploaded.getvalue().decode("utf-8", errors="replace") if uploaded else ""
     )
     if uploaded_text:
-        # A read-only preview, not an input. A disabled st.text_area is styled
-        # at fadedText40 (Streamlit forces it through -webkit-text-fill-color)
-        # and still occupies the tab order, so it reads as a broken field; a
-        # fixed-height container scrolls the same way at full contrast and
-        # leaves one fewer widget in the session.
-        with st.container(height=150):
-            st.text(uploaded_text, width="stretch")
+        _preview(uploaded_text)
 with sample_tab:
     choice = st.segmented_control(
         "Pick a sample", list(SAMPLE_TEXTS), key="sample_select"
     )
     sample_text = SAMPLE_TEXTS.get(choice, "")
     if sample_text:
-        # Read-only preview — see the Upload tab above for why this is not a
-        # disabled st.text_area.
-        with st.container(height=150):
-            st.text(sample_text, width="stretch")
+        _preview(sample_text)
 
 input_text = resolve_input(pasted, uploaded_text, sample_text)
 
