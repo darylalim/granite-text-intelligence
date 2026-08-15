@@ -403,6 +403,13 @@ def _render_confidence(parsed: dict[str, Any]) -> None:
 # schema and stays English, so this mapping is stable; orange (not the
 # low-contrast yellow) is used for "mixed". Any out-of-enum label falls through
 # to an uncolored value.
+#
+# "negative" stays red even though Streamlit's built-in themes make red the
+# primary too (#FF4B4B — the Run button, the active tab underline, the selected
+# sample chip), so the two share a hue family. Considered and kept: red for
+# negative is near-universal, the alternatives are worse (orange is taken by
+# "mixed", yellow is low-contrast on light), and separating them would mean
+# reintroducing a custom theme the app deliberately does not ship.
 _SENTIMENT_COLOR = {
     "positive": "green",
     "negative": "red",
