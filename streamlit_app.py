@@ -533,26 +533,23 @@ with upload_tab:
         uploaded.getvalue().decode("utf-8", errors="replace") if uploaded else ""
     )
     if uploaded_text:
-        st.text_area(
-            "Uploaded",
-            value=uploaded_text,
-            height=150,
-            disabled=True,
-            label_visibility="collapsed",
-        )
+        # A read-only preview, not an input. A disabled st.text_area is styled
+        # at fadedText40 (Streamlit forces it through -webkit-text-fill-color)
+        # and still occupies the tab order, so it reads as a broken field; a
+        # fixed-height container scrolls the same way at full contrast and
+        # leaves one fewer widget in the session.
+        with st.container(height=150):
+            st.text(uploaded_text, width="stretch")
 with sample_tab:
     choice = st.segmented_control(
         "Pick a sample", list(SAMPLE_TEXTS), key="sample_select"
     )
     sample_text = SAMPLE_TEXTS.get(choice, "")
     if sample_text:
-        st.text_area(
-            "Sample",
-            value=sample_text,
-            height=150,
-            disabled=True,
-            label_visibility="collapsed",
-        )
+        # Read-only preview — see the Upload tab above for why this is not a
+        # disabled st.text_area.
+        with st.container(height=150):
+            st.text(sample_text, width="stretch")
 
 input_text = resolve_input(pasted, uploaded_text, sample_text)
 
