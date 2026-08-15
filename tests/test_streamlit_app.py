@@ -424,6 +424,12 @@ class TestRenderResult:
             pytest.param([], [], id="empty-list"),
             pytest.param([1, 2], [], id="numbers-dropped"),
             pytest.param(["   "], [], id="blank-label-dropped"),
+            # A dict with no usable label would otherwise pass the caller's
+            # `if rows:` guard and render a table of blank rows instead of the
+            # "No topics found." fallback.
+            pytest.param([{}], [], id="empty-object-dropped"),
+            pytest.param([{"confidence": 0.9}], [], id="label-less-object-dropped"),
+            pytest.param([{"label": "  "}], [], id="blank-object-label-dropped"),
             pytest.param(
                 ["politics", "economy"],
                 [{"label": "politics"}, {"label": "economy"}],

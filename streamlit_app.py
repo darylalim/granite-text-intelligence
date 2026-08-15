@@ -425,25 +425,31 @@ _SENTIMENT_COLOR = {
 def _topic_rows(topics: Any) -> list[dict[str, Any]]:
     """Coerce the model's `topics` value into rows `st.dataframe` can render.
 
-    A non-empty-list check is not enough, because two plausible malformations
+    A non-empty-list check is not enough, because three plausible malformations
     survive it and break the table in different ways:
 
     * a list of bare label strings (`["politics", "economy"]`) converts to a
       single column literally headed `value`; `column_config` names nothing in
       it, so the labels lose their header and the confidence bar disappears;
     * a list mixing objects with scalars raises `StreamlitAPIException`, which
-      the caller's blind except degrades to "Could not render this result."
+      the caller's blind except degrades to "Could not render this result.";
+    * a list of objects carrying no usable `label` (`[{}]`, or
+      `[{"confidence": 0.9}]` from a truncated object) renders a table of blank
+      rows instead of falling through to "No topics found."
 
-    So bare strings are promoted to the documented `{"label": …}` shape and any
-    other non-mapping entry is dropped. Dropping is not data loss for the user:
-    the JSON tab always shows the raw response. A row missing `confidence`
-    renders as an empty bar rather than raising.
+    So bare strings are promoted to the documented `{"label": …}` shape, and an
+    entry survives only if it has something to show in the Topic column. Both
+    shapes are held to the *same* test, which is what lets a truthy return mean
+    "there is a topic to render" — the caller's `if rows:` is the fallback's
+    only guard. Dropping is not data loss for the user: the JSON tab always
+    shows the raw response. A row missing `confidence` renders as an empty bar
+    rather than raising.
     """
     if not isinstance(topics, list):
         return []
     rows: list[dict[str, Any]] = []
     for topic in topics:
-        if isinstance(topic, dict):
+        if isinstance(topic, dict) and str(topic.get("label", "")).strip():
             rows.append(topic)
         elif isinstance(topic, str) and topic.strip():
             rows.append({"label": topic})
