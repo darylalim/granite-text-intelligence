@@ -581,7 +581,13 @@ language_col, _ = st.columns([1, 2])
 language = language_col.selectbox("Output language", LANGUAGES, key="language")
 
 # ---- Features (left) and Results (right) ----
-features_column, results_column = st.columns(2)
+# 2:3, not 2:2. The results panel carries five icon-prefixed tabs needing
+# ~377 CSS px of label; an even split made that a function of window width, so
+# the strip still collapsed into a scrolling chevron in any narrow window even
+# under layout="wide" — it moved the threshold rather than removing it. The
+# features column holds four toggles and one button and does not need half the
+# page, so giving the results 3/5 buys the room structurally.
+features_column, results_column = st.columns([2, 3])
 
 with features_column:
     st.subheader("Features")
