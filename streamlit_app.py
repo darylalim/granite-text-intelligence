@@ -213,6 +213,10 @@ _LOCALIZED_TOKEN_MULTIPLIER = 2
 st.set_page_config(
     page_title="Granite Text Intelligence",
     page_icon=":material/psychology:",
+    # Wide, because the results panel is only half the page and carries five
+    # icon-prefixed tabs; at the centered width they overflow into a scrolling
+    # strip that hides whichever label is furthest from the active one.
+    layout="wide",
 )
 
 st.session_state.setdefault("results", None)
