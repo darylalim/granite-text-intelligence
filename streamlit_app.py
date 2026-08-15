@@ -418,6 +418,34 @@ _SENTIMENT_COLOR = {
 }
 
 
+def _topic_rows(topics: Any) -> list[dict[str, Any]]:
+    """Coerce the model's `topics` value into rows `st.dataframe` can render.
+
+    A non-empty-list check is not enough, because two plausible malformations
+    survive it and break the table in different ways:
+
+    * a list of bare label strings (`["politics", "economy"]`) converts to a
+      single column literally headed `value`; `column_config` names nothing in
+      it, so the labels lose their header and the confidence bar disappears;
+    * a list mixing objects with scalars raises `StreamlitAPIException`, which
+      the caller's blind except degrades to "Could not render this result."
+
+    So bare strings are promoted to the documented `{"label": …}` shape and any
+    other non-mapping entry is dropped. Dropping is not data loss for the user:
+    the JSON tab always shows the raw response. A row missing `confidence`
+    renders as an empty bar rather than raising.
+    """
+    if not isinstance(topics, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for topic in topics:
+        if isinstance(topic, dict):
+            rows.append(topic)
+        elif isinstance(topic, str) and topic.strip():
+            rows.append({"label": topic})
+    return rows
+
+
 def render_result(key: str, result: dict[str, Any]) -> None:
     """Render one feature's result using native components.
 
@@ -430,13 +458,19 @@ def render_result(key: str, result: dict[str, Any]) -> None:
         return
     if parsed is None:
         st.warning("Could not parse JSON output; showing the raw response.")
-        st.code(raw)
+        # language=None is plain monospace. st.code defaults to language="python",
+        # which syntax-highlights model prose as code on the one branch whose
+        # whole purpose is showing what the model actually said — and claiming
+        # "json" would be a guess, since this branch runs precisely because the
+        # output did not parse. wrap_lines keeps a long single-line response
+        # inside the results column instead of scrolling it sideways.
+        st.code(raw, language=None, wrap_lines=True)
         return
     if key == "topics":
-        topics = parsed.get("topics", [])
-        if isinstance(topics, list) and topics:
+        rows = _topic_rows(parsed.get("topics"))
+        if rows:
             st.dataframe(
-                topics,
+                rows,
                 hide_index=True,
                 column_config={
                     "label": st.column_config.TextColumn("Topic"),

@@ -20,6 +20,7 @@ from streamlit_app import (
     MODEL_MAX_TOKENS,
     _effective_max_tokens,
     _resolve_max_input_tokens,
+    _topic_rows,
     language_directive,
     parse_json_output,
     render_result,
@@ -415,6 +416,51 @@ class TestRenderResult:
     def test_non_list_topics_not_sent_to_dataframe(self, mock_st: MagicMock) -> None:
         render_result("topics", {"raw": "x", "parsed": {"topics": "politics"}})
         mock_st.dataframe.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "topics, expected",
+        [
+            pytest.param("politics", [], id="string-not-list"),
+            pytest.param([], [], id="empty-list"),
+            pytest.param([1, 2], [], id="numbers-dropped"),
+            pytest.param(["   "], [], id="blank-label-dropped"),
+            pytest.param(
+                ["politics", "economy"],
+                [{"label": "politics"}, {"label": "economy"}],
+                id="bare-strings-promoted",
+            ),
+            pytest.param(
+                [{"label": "a", "confidence": 0.9}, "loose"],
+                [{"label": "a", "confidence": 0.9}, {"label": "loose"}],
+                id="mixed-shapes-normalized",
+            ),
+        ],
+    )
+    def test_topic_rows_normalizes_untrusted_shapes(
+        self, topics: object, expected: list[dict]
+    ) -> None:
+        # Both dropped shapes are real failures, not hypotheticals: a bare list
+        # of strings renders a column headed `value` (column_config names
+        # nothing in it), and a list mixing objects with scalars raises
+        # StreamlitAPIException inside st.dataframe.
+        assert _topic_rows(topics) == expected
+
+    @patch("streamlit_app.st")
+    def test_mixed_topic_shapes_still_reach_dataframe(self, mock_st: MagicMock) -> None:
+        # The normalized rows must be what st.dataframe receives — dropping the
+        # whole table to "No topics found." would discard labels the model did
+        # return.
+        render_result(
+            "topics",
+            {
+                "raw": "x",
+                "parsed": {"topics": [{"label": "a", "confidence": 0.9}, "b"]},
+            },
+        )
+        assert mock_st.dataframe.call_args[0][0] == [
+            {"label": "a", "confidence": 0.9},
+            {"label": "b"},
+        ]
 
     @patch("streamlit_app.st")
     def test_numeric_confidence_rendered_as_percent(self, mock_st: MagicMock) -> None:
