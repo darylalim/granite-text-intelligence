@@ -610,18 +610,28 @@ with features_column:
     )
 
 with results_column:
-    # Claim this panel's slots *before* the run, and fill them after. Streamlit
-    # emits a delta as each st.* call executes and leaves the previous run's
-    # elements on screen — faded to ~33% once the run outruns a short delay —
-    # until the new run re-emits them. Creating the tabs after inference would
-    # therefore leave the whole panel stale for the length of a 5.2 GB model
-    # load plus up to four generations, including the now-actively-misleading
-    # "Inputs changed since this run" note. The spinners below do not repaint
-    # it: st.spinner enqueues on a *transient* cursor that never advances the
-    # real delta path. Containers accept content out of order, so the bodies
-    # below are unchanged — only the emission order is.
+    # Claim this panel's slots *before* the run, and fill them after. Two wins,
+    # neither of which the spinners provide — st.spinner enqueues on a
+    # *transient* cursor that never advances the real delta path:
+    #
+    # 1. The tab block now sits at a fixed child index. It used to follow the
+    #    two conditional notices, so its delta path shifted between 0, 1 and 2
+    #    as they appeared and disappeared; landing on a path previously held by
+    #    a different node remounts the block and silently resets the user's
+    #    selected tab.
+    # 2. The tab bar paints immediately rather than waiting out a 5.2 GB model
+    #    load plus up to four generations.
+    #
+    # The notices need st.empty(), not a plain container: re-emitting an empty
+    # *container* keeps its existing children — Streamlit only drops them in
+    # clearStaleNodes at end-of-run — so the previous run's "Inputs changed
+    # since this run" note would stay on screen, faded but readable, for the
+    # whole of a run it no longer describes. st.empty() clears at the top of
+    # the rerun instead; the child container is what lets one slot hold both
+    # notices. The results themselves are unavoidably the previous run's until
+    # inference returns, which is why the tab bodies stay below.
     status_slot = st.container()
-    notice_slot = st.container()
+    notice_slot = st.empty()
     tabs = st.tabs(
         [
             ":material/data_object: JSON",
@@ -652,11 +662,17 @@ with results_column:
                     "signature": _run_signature(input_text, enabled, language),
                 }
             except Exception as exc:  # noqa: BLE001 (top-level run guard)
+                # Drop the previous run's results. The tabs are painted above
+                # by the time this lands, so keeping them would show the *old*
+                # answers underneath this traceback with nothing marking them
+                # stale — and the "Inputs changed" note reads as "you edited
+                # something", not "this run failed".
+                st.session_state.results = None
                 st.exception(exc)
 
     results = cast("dict[str, Any] | None", st.session_state.results)
     if results is not None:
-        with notice_slot:
+        with notice_slot.container():
             if results["truncated"]:
                 st.warning(
                     f"Input was truncated to the first {MAX_INPUT_TOKENS} tokens.",
