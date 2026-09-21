@@ -26,6 +26,7 @@ The model (~7.3 GB, bf16) downloads automatically the first time you click **Run
 - **First Run is slow.** The initial click loads ~7.3 GB into unified memory; the "Loading model…" and per-feature spinners mean it's working, not hung.
 - **Out of memory?** Lower `MAX_INPUT_TOKENS` to shrink the KV cache, or switch `MODEL_NAME` to a quantized build of the same 3B — [`ibm-granite/granite-4.2-3b-q4-mlx`](https://huggingface.co/ibm-granite/granite-4.2-3b-q4-mlx) (~2.1 GB of weights, fits an 8 GB Mac) or [`ibm-granite/granite-4.2-3b-q8-mlx`](https://huggingface.co/ibm-granite/granite-4.2-3b-q8-mlx) (~3.9 GB). Quantization changes only the weights, so the KV cache per token is the same.
 - **Interrupted download?** Re-run — downloads resume from the Hugging Face cache rather than starting over.
+- **Non-English input coming back in English?** "Match input" (the default) asks the model to answer in the input's language, and the 3B does so for most languages but answers **Japanese** input in English; pick the language explicitly under **Output language** and it localizes. Very short inputs can also get a summary that restates them nearly verbatim.
 
 ## Usage
 

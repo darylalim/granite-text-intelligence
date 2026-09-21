@@ -303,18 +303,6 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
        apparently read as a literal string to emit rather than a field to
        translate. The schema in the system prompt is what pins the actual key
        spelling, so the directive does not need to quote it.
-
-    A further constraint is not a wording choice but a correctness one: the
-    requirement is never phrased as a negative ("not in English"), because
-    under LANGUAGE_AUTO the target may itself be English and contradict it.
-
-    The "such as the sentiment label" aside is deliberately sent to *all three*
-    JSON features even though only Sentiment has an enum. It reads as dead
-    weight in the Topics and Intents prompts, but a second A/B replacing it
-    with a feature-aware clause (keys-only where no enum exists) collapsed
-    Japanese topic labels into meaningless katakana in both variants tried.
-    The clause is load-bearing for reasons that are not obvious; leave it.
-
     4. **Stated at both ends, and "entirely".** Added when the app moved to
        Granite 4.2-3b, which honored the 4.1 wording for only 11 of 21
        localized fields (every Japanese rationale stayed English). The A/B
@@ -331,6 +319,17 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
        a script check cannot see. Under LANGUAGE_AUTO with *Japanese* input the
        3B still answers in English under every wording tried; that is a model
        limitation, not a directive one.
+
+    A further constraint is not a wording choice but a correctness one: the
+    requirement is never phrased as a negative ("not in English"), because
+    under LANGUAGE_AUTO the target may itself be English and contradict it.
+
+    The "such as the sentiment label" aside is deliberately sent to *all three*
+    JSON features even though only Sentiment has an enum. It reads as dead
+    weight in the Topics and Intents prompts, but a second A/B replacing it
+    with a feature-aware clause (keys-only where no enum exists) collapsed
+    Japanese topic labels into meaningless katakana in both variants tried.
+    The clause is load-bearing for reasons that are not obvious; leave it.
     """
     if language == LANGUAGE_ENGLISH:
         return ""
@@ -370,6 +369,27 @@ def _effective_max_tokens(feature: dict[str, Any], language: str) -> int:
     return base * _LOCALIZED_TOKEN_MULTIPLIER
 
 
+def _strip_control_markers(text: str, tokenizer: TokenizerWrapper) -> str:
+    """Remove chat-template control markers from untrusted input text.
+
+    The tokenizer turns the literal strings of its *added* tokens back into
+    the control ids — `<|im_end|>`, `<|im_start|>`, `<think>` … — wherever they
+    appear in the prompt, so a pasted chat transcript (ChatML markers are
+    common in real-world text) could end the user turn early and open an
+    assistant turn of its own, priming whatever "analysis" follows. The set
+    comes from `get_added_vocab()`, not `all_special_tokens`: on Granite 4.2
+    only three tokens are *special*, and `<|im_start|>` is not among them.
+    Markers are dropped rather than escaped — they are control syntax, never
+    content, and the tokenizer has no escape for them.
+    """
+    # Typed local: TokenizerWrapper proxies to the HF tokenizer via __getattr__,
+    # so the call's type is Unknown to ty and str.replace fails to resolve.
+    added: dict[str, int] = tokenizer.get_added_vocab()
+    for marker in sorted(added, key=len, reverse=True):
+        text = text.replace(marker, "")
+    return text
+
+
 def run_feature(
     feature: dict[str, Any],
     text: str,
@@ -382,6 +402,7 @@ def run_feature(
     The language_directive is appended to the user turn (the system prompt stays
     verbatim, preserving IBM's documented JSON pattern).
     """
+    text = _strip_control_markers(text, tokenizer)
     user = feature["user_template"].format(text=text) + language_directive(
         feature, language
     )
@@ -397,7 +418,8 @@ def run_feature(
     # spends the 128–256-token budgets reasoning, and parse_json_output can latch
     # onto a draft object inside the reasoning. The rendered string is passed to
     # generate() as-is: mlx-lm re-encodes a str prompt with
-    # add_special_tokens=True, but this tokenizer adds no BOS either way
+    # add_special_tokens=True unless it already starts with the BOS (this
+    # ChatML prompt never does), but this tokenizer adds no BOS either way
     # (verified — see CLAUDE.md), so pre-tokenizing would buy nothing.
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
