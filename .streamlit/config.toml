@@ -1,0 +1,13 @@
+# Non-theme options only. No [theme] section may ship: the app relies on
+# Streamlit's built-in light and dark themes, and TestThemeConfig asserts
+# the section's absence — see CLAUDE.md, Configuration.
+
+[server]
+# Disables LocalSourcesWatcher. Its post-run scan of sys.modules probes every
+# module with hasattr(m, "__path__"), and transformers 5's lazy placeholder
+# modules import their real file on any attribute access — for the vision
+# image-processors that is `import torch`, which is not installed. The result
+# was ~109 logged tracebacks and ~0.4 s after every Run, on every Run, since a
+# failed import never replaces the placeholder. Cost of "none": no automatic
+# rerun when a source file changes — press R, or restart `streamlit run`.
+fileWatcherType = "none"
