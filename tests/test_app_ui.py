@@ -20,14 +20,38 @@ def _clear_caches() -> Iterator[None]:
     st.cache_resource.clear()
 
 
+_TOPICS_SYSTEM = next(f["system"] for f in FEATURES if f["key"] == "topics")
+# The second row has no confidence: a promoted / truncated topic must render
+# as an empty bar, not raise, and that column of one float and one NaN is the
+# shape the pyarrow path has to accept (see test_topics_tab_renders_a_dataframe).
+TOPICS_PAYLOAD = (
+    '{"topics": [{"label": "earbuds", "confidence": 0.9}, {"label": "battery"}]}'
+)
+SENTIMENT_PAYLOAD = '{"sentiment": "positive", "confidence": 0.9}'
+
+
 @pytest.fixture
 def fake_tokenizer() -> MagicMock:
-    """Mock tokenizer that satisfies truncate_to_tokens and run_feature."""
+    """Mock tokenizer that satisfies truncate_to_tokens and run_feature.
+
+    apply_chat_template hands back the system message as the "rendered" prompt,
+    so the generate mock below can tell which feature is asking.
+    """
     tok = MagicMock()
     tok.encode.return_value = [1, 2, 3]
     tok.decode.return_value = "decoded text"
-    tok.apply_chat_template.return_value = "PROMPT"
+    tok.apply_chat_template.side_effect = lambda messages, **_: messages[0]["content"]
     return tok
+
+
+def _fake_generate(_model: object, _tokenizer: object, prompt: str, **_: object) -> str:
+    """Topics gets a topics payload; every other feature gets the sentiment one.
+
+    A single fixed payload left the Topics tab rendering "No topics found." in
+    every test, so st.dataframe — the app's one trip through pyarrow — was
+    never executed by the gate.
+    """
+    return TOPICS_PAYLOAD if prompt == _TOPICS_SYSTEM else SENTIMENT_PAYLOAD
 
 
 @pytest.fixture
@@ -40,10 +64,7 @@ def patched_model(fake_tokenizer: MagicMock) -> Iterator[MagicMock]:
     """
     with (
         patch("mlx_lm.load", return_value=(MagicMock(), fake_tokenizer)),
-        patch(
-            "mlx_lm.generate",
-            return_value='{"sentiment": "positive", "confidence": 0.9}',
-        ),
+        patch("mlx_lm.generate", side_effect=_fake_generate),
     ):
         yield fake_tokenizer
 
@@ -165,6 +186,28 @@ class TestRunInteraction:
         assert at.metric[0].label == "Sentiment"
         assert at.metric[0].value == ":green[positive]"  # colored by sentiment enum
         assert any("90%" in caption.value for caption in at.caption)
+
+    def test_topics_tab_renders_a_dataframe(self, patched_model: MagicMock) -> None:
+        # The Topics tab holds the app's only st.dataframe, and so its only
+        # trip through pyarrow — the one transitive dependency whose 25.0.0
+        # release segfaulted in exactly Streamlit's script-thread pattern
+        # (apache/arrow#50471); only streamlit's own `!=25.0.0` marker keeps
+        # it out of the lock. Reading `.value` back decodes the Arrow bytes the
+        # element carries, so both directions of that path execute here.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Great earbuds, battery lasts all day.")
+        at.run()
+        at.button(key="run").click().run()
+
+        assert not at.exception
+        assert len(at.dataframe) == 1
+        frame = at.dataframe[0].value
+        assert list(frame["label"]) == ["earbuds", "battery"]
+        assert frame["confidence"].tolist()[0] == pytest.approx(0.9)
+        # The promoted row's missing confidence is a null, not a raise or a
+        # dropped row — that is what renders as the empty progress bar.
+        assert frame["confidence"].isna().tolist() == [False, True]
 
     def test_sample_selection_feeds_the_run(self, patched_model: MagicMock) -> None:
         # Selecting a built-in sample resolves as the input (precedence falls
