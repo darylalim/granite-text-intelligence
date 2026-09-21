@@ -317,6 +317,28 @@ class TestRunFeature:
         assert call_kwargs["max_tokens"] == FEATURES[1]["max_tokens"]
 
     @patch("streamlit_app.generate")
+    def test_disables_thinking_explicitly(
+        self, mock_generate: MagicMock, tokenizer: MagicMock
+    ) -> None:
+        # Granite 4.2 reasons inside <think>…</think> by default, and mlx-lm's
+        # TokenizerWrapper injects enable_thinking=True whenever the kwarg is
+        # *omitted* — so the only way to get a direct answer is to pass False
+        # explicitly. Dropping the kwarg is the mutation that spends every JSON
+        # feature's 128–256-token budget on reasoning and lets parse_json_output
+        # scrape a draft object out of the think block; the mock cannot see any
+        # of that, so the call site is pinned directly.
+        mock_generate.return_value = "{}"
+
+        run_feature(FEATURES[3], "hello", MagicMock(), tokenizer)
+
+        template_kwargs = tokenizer.apply_chat_template.call_args[1]
+        # .get, so an omitted kwarg fails the assertion rather than raising
+        # KeyError — omitted is the real-world failure, and it must read as one.
+        assert template_kwargs.get("enable_thinking") is False
+        assert template_kwargs["add_generation_prompt"] is True
+        assert template_kwargs["tokenize"] is False
+
+    @patch("streamlit_app.generate")
     def test_passes_effective_budget_to_generate(
         self, mock_generate: MagicMock, tokenizer: MagicMock
     ) -> None:
@@ -551,15 +573,35 @@ class TestLanguageDirective:
         self, index: int, language: str
     ) -> None:
         # Instructions nearest the generation point carry the most weight, so
-        # the keep-English exception must not be the trailing clause. Located
-        # with find(), not rindex(): a missing clause must fail this assertion
+        # the keep-English exception must not be the trailing clause. The
+        # requirement is now stated at both ends (see the 4.2 A/B), so the
+        # *closing* clause is what must follow the exception — located with
+        # rfind(), not rindex(): a missing clause must fail this assertion
         # rather than raise ValueError and obscure which invariant broke.
         directive = language_directive(FEATURES[index], language)
         keep_at = directive.find("Keep every JSON key")
-        write_at = directive.find("Write ")
+        write_at = directive.rfind("Write ")
         assert keep_at != -1, "keep-English clause missing"
         assert write_at != -1, "localize clause missing"
         assert keep_at < write_at
+
+    @pytest.mark.parametrize("index", _JSON_FEATURES)
+    @pytest.mark.parametrize("language", [LANGUAGE_AUTO, "Japanese", "German"])
+    def test_json_requirement_is_emphatic(self, index: int, language: str) -> None:
+        # Granite 4.2-3b honored the plain "Write <field> in <language>" for
+        # only 11 of 21 localized fields. The 4.2 A/B settled on stating the
+        # requirement at both ends — a plain opener and an "entirely" closer —
+        # which localized 9/9 German, 9/9 Japanese and echoed nothing. Pinned
+        # as substrings so a well-meaning tidy-up of the wording fails here,
+        # not in a user's Japanese run.
+        directive = language_directive(FEATURES[index], language)
+        field = FEATURES[index]["localized_field"]
+        assert directive.startswith(f"\n\nWrite {field} in ")
+        assert f". Write {field} entirely in " in directive
+        # "…, every sentence of it" scored as well by the script check, but
+        # under LANGUAGE_AUTO "it" binds to "the text above" and the model
+        # copies the input as its rationale. Pinned so the phrase cannot return.
+        assert "every sentence" not in directive
 
     def test_prose_suppresses_language_commentary(self) -> None:
         # Guards against trailing asides like "(Note: written in Japanese as
@@ -621,9 +663,9 @@ class TestResolveMaxInputTokens:
                 assert _resolve_max_input_tokens() == _DEFAULT_MAX_INPUT_TOKENS
 
     def test_default_and_ceiling_pinned(self) -> None:
-        # Deliberate choices: 16K is the memory-safe default (~2.6 GB of KV cache
-        # at ~160 KB/token, independent of the weights' quantization); 131072 is
-        # Granite 4.1's 128K ceiling. Pinned so neither drifts silently.
+        # Deliberate choices: 16K is the memory-safe default (~1.3 GB of KV cache
+        # at the 3B's ~80 KB/token, independent of the weights' quantization);
+        # 131072 is Granite 4.2's 128K ceiling. Pinned so neither drifts silently.
         assert _DEFAULT_MAX_INPUT_TOKENS == 16384
         assert MODEL_MAX_TOKENS == 131072
         # The default must itself sit inside the clamp range.

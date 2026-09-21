@@ -12,20 +12,23 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 load_dotenv()  # populate HF_TOKEN from .env; deploy env vars take precedence
 
-# 4-bit (affine, group_size 32) MLX conversion of ibm-granite/granite-4.1-8b:
-# ~5.2 GB of weights vs ~16.8 GB for the bf16 build, same architecture and
-# tokenizer. Quantization touches weights only, so the KV cache below is
-# unaffected. Swap in "…-8b-bf16" (or "…-8b-8bit", ~9.4 GB) for more fidelity
-# on a larger Mac.
-MODEL_NAME = "mlx-community/granite-4.1-8b-4bit"
+# IBM's own MLX conversion of ibm-granite/granite-4.2-3b, full-precision bf16:
+# ~7.3 GB of weights, converted by IBM's release pipeline with the same mlx-lm
+# this project pins. Swap in "…-3b-q8-mlx" (~3.9 GB) or "…-3b-q4-mlx" (~2.1 GB)
+# for a smaller Mac, or "…-8b-q4-mlx" (~5 GB) for the larger model in a similar
+# total-memory envelope — its KV cache is ~160 KB/token, twice the 3B's, so the
+# 16K default costs ~2.7 GB there. Quantization touches weights only, so the KV
+# cache below is the same across variants of one size.
+MODEL_NAME = "ibm-granite/granite-4.2-3b-bf16-mlx"
 
-# Granite 4.1's 128K context ceiling; configured caps are clamped to it.
+# Granite 4.2's 128K context ceiling; configured caps are clamped to it.
 MODEL_MAX_TOKENS = 131072
 
 # Default input-token budget. Inputs longer than MAX_INPUT_TOKENS are truncated
-# (with a warning) before analysis. The KV cache costs ~160 KB/token, so raising
-# the cap raises memory and prefill latency — see CLAUDE.md. Larger Macs can opt
-# into more via the MAX_INPUT_TOKENS env var.
+# (with a warning) before analysis. The 3B's KV cache costs ~80 KB/token (40
+# layers × 8 KV heads × 64 head dim × K+V × bf16), so raising the cap raises
+# memory and prefill latency — see CLAUDE.md. Larger Macs can opt into more via
+# the MAX_INPUT_TOKENS env var.
 _DEFAULT_MAX_INPUT_TOKENS = 16384
 
 
@@ -59,7 +62,9 @@ TEMP = 0.0
 REPETITION_PENALTY = 1.2
 
 # IBM Granite's documented JSON system-prompt pattern, reproduced verbatim
-# (including the trailing newline) from the official granite-4.1 README/docs.
+# (including the trailing newline) from the Granite 4.0/4.1 docs. The 4.2 docs
+# list structured JSON output as a native capability without restating the
+# prompt; the smoke test in CLAUDE.md is what shows it still holds on 4.2.
 # Output is still not guaranteed JSON, so it is parsed defensively — see
 # parse_json_output.
 _JSON_SYSTEM = (
@@ -179,10 +184,11 @@ SAMPLE_TEXTS: dict[str, str] = {
     ),
 }
 
-# Granite 4.1's officially supported languages. Output can be localized to any of
-# them, or "Match input" to mirror the analyzed text's language. Only free-text
-# *values* are localized — JSON keys and enums stay English so parse_json_output
-# and render_result keep working (see language_directive).
+# Granite 4.2's officially tested languages (unchanged from 4.1). Output can be
+# localized to any of them, or "Match input" to mirror the analyzed text's
+# language. Only free-text *values* are localized — JSON keys and enums stay
+# English so parse_json_output and render_result keep working (see
+# language_directive).
 LANGUAGE_AUTO = "Match input"
 LANGUAGE_ENGLISH = "English"
 LANGUAGES: list[str] = [
@@ -281,7 +287,7 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
     so parse_json_output and render_result — which read results by English key —
     keep working. Returns "" for English (the prompts are already English).
 
-    Three wording choices are deliberate, each a fix for observed misbehavior
+    Four wording choices are deliberate, each a fix for observed misbehavior
     and each settled by an A/B against the live model (see CLAUDE.md):
 
     1. **Order.** The keep-English exception comes first and the localize
@@ -298,7 +304,7 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
        translate. The schema in the system prompt is what pins the actual key
        spelling, so the directive does not need to quote it.
 
-    A fourth constraint is not a wording choice but a correctness one: the
+    A further constraint is not a wording choice but a correctness one: the
     requirement is never phrased as a negative ("not in English"), because
     under LANGUAGE_AUTO the target may itself be English and contradict it.
 
@@ -308,6 +314,23 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
     with a feature-aware clause (keys-only where no enum exists) collapsed
     Japanese topic labels into meaningless katakana in both variants tried.
     The clause is load-bearing for reasons that are not obvious; leave it.
+
+    4. **Stated at both ends, and "entirely".** Added when the app moved to
+       Granite 4.2-3b, which honored the 4.1 wording for only 11 of 21
+       localized fields (every Japanese rationale stayed English). The A/B
+       re-run on 4.2 (see CLAUDE.md) settled on opening with "Write <field>
+       in <language>." and closing with "Write <field> entirely in
+       <language>." — the closing clause still comes last (point 1). Two
+       near-misses are worth knowing: "…, every sentence of it" appended to
+       the closing clause scored as well by the script check but, under
+       LANGUAGE_AUTO, "it" binds to "the text above" and the model *copies the
+       input* as its rationale (3 echoes in 15 default-path cases, including
+       the built-in Product review); and restating the requirement in a
+       longer form at both ends scored highest of all but turned German topic
+       labels into garbled compounds — localized and meaningless, the failure
+       a script check cannot see. Under LANGUAGE_AUTO with *Japanese* input the
+       3B still answers in English under every wording tried; that is a model
+       limitation, not a directive one.
     """
     if language == LANGUAGE_ENGLISH:
         return ""
@@ -321,10 +344,11 @@ def language_directive(feature: dict[str, Any], language: str) -> str:
             f"\n\nWrite your entire response in {target}. Output only the "
             f"response itself, with no note or comment about the language used."
         )
+    field = feature["localized_field"]
     return (
-        f"\n\nKeep every JSON key exactly as given in the schema, and keep "
-        f"enumerated values (such as the sentiment label) in English. "
-        f"Write {feature['localized_field']} in {target}."
+        f"\n\nWrite {field} in {target}. Keep every JSON key exactly as given "
+        f"in the schema, and keep enumerated values (such as the sentiment "
+        f"label) in English. Write {field} entirely in {target}."
     )
 
 
@@ -365,8 +389,18 @@ def run_feature(
         {"role": "system", "content": feature["system"]},
         {"role": "user", "content": user},
     ]
+    # enable_thinking=False is load-bearing, and must be explicit: Granite 4.2
+    # thinks by default, and mlx-lm's TokenizerWrapper injects
+    # enable_thinking=True whenever <think> is in the vocab, so omitting the
+    # kwarg renders the thinking prompt. With it, the template ends the prompt
+    # in "<think></think>" and the model answers directly; without it the model
+    # spends the 128–256-token budgets reasoning, and parse_json_output can latch
+    # onto a draft object inside the reasoning. The rendered string is passed to
+    # generate() as-is: mlx-lm re-encodes a str prompt with
+    # add_special_tokens=True, but this tokenizer adds no BOS either way
+    # (verified — see CLAUDE.md), so pre-tokenizing would buy nothing.
     prompt = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
+        messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
     sampler = make_sampler(temp=TEMP)
     # Repetition penalty helps prose but harms JSON (it down-weights the repeated
@@ -619,7 +653,7 @@ with results_column:
     #    as they appeared and disappeared; landing on a path previously held by
     #    a different node remounts the block and silently resets the user's
     #    selected tab.
-    # 2. The tab bar paints immediately rather than waiting out a 5.2 GB model
+    # 2. The tab bar paints immediately rather than waiting out a 7.3 GB model
     #    load plus up to four generations.
     #
     # The notices need st.empty(), not a plain container: re-emitting an empty

@@ -4,11 +4,11 @@
 [![Release](https://img.shields.io/github/v/release/darylalim/granite-text-intelligence)](https://github.com/darylalim/granite-text-intelligence/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Granite Text Intelligence** is a Streamlit application for **summarization, topic, intent, and sentiment analysis** using IBM's [granite-4.1-8b](https://huggingface.co/ibm-granite/granite-4.1-8b) on Apple Silicon with [MLX](https://github.com/ml-explore/mlx) (Apple's on-device ML framework, via `mlx-lm`), running locally. It's a single-shot playground: provide text, choose which analyses to run, and get the results back — all powered by prompting one Granite model. Results can be returned in the input's language or any of Granite's 12 supported languages.
+**Granite Text Intelligence** is a Streamlit application for **summarization, topic, intent, and sentiment analysis** using IBM's [granite-4.2-3b](https://huggingface.co/ibm-granite/granite-4.2-3b) on Apple Silicon with [MLX](https://github.com/ml-explore/mlx) (Apple's on-device ML framework, via `mlx-lm`), running locally. It's a single-shot playground: provide text, choose which analyses to run, and get the results back — all powered by prompting one Granite model. Results can be returned in the input's language or any of Granite's 12 supported languages.
 
 ![Granite Text Intelligence in dark mode: the Product review sample analyzed, with the Sentiment tab showing a positive result at 95% confidence](docs/images/screenshot-dark.png)
 
-Requires an Apple Silicon (M-series) Mac with ~16 GB+ of unified memory — the default model is a 4-bit quantization of the 8B ([`mlx-community/granite-4.1-8b-4bit`](https://huggingface.co/mlx-community/granite-4.1-8b-4bit)), which uses ~5.2 GB for weights plus up to ~2.6 GB of KV cache at the default input length. For maximum fidelity on a 32 GB+ Mac, set `MODEL_NAME` in `streamlit_app.py` to `mlx-community/granite-4.1-8b-8bit` (~9.4 GB) or `mlx-community/granite-4.1-8b-bf16` (~16.8 GB, full precision).
+Requires an Apple Silicon (M-series) Mac with ~16 GB+ of unified memory — the default model is IBM's own full-precision MLX build of the 3B ([`ibm-granite/granite-4.2-3b-bf16-mlx`](https://huggingface.co/ibm-granite/granite-4.2-3b-bf16-mlx)), which uses ~7.3 GB for weights plus up to ~1.3 GB of KV cache at the default input length. For the larger 8B at about the same footprint, set `MODEL_NAME` in `streamlit_app.py` to `ibm-granite/granite-4.2-8b-q4-mlx` (~5 GB, 4-bit); on a 32 GB+ Mac, `ibm-granite/granite-4.2-8b-q8-mlx` (~9.3 GB) or `ibm-granite/granite-4.2-8b-bf16-mlx` (~17.6 GB, full precision).
 
 ## Setup
 
@@ -19,12 +19,12 @@ uv sync
 uv run streamlit run streamlit_app.py
 ```
 
-The model (~5.2 GB, 4-bit) downloads automatically the first time you click **Run** (you'll see a "Loading model…" spinner) and is cached for later runs.
+The model (~7.3 GB, bf16) downloads automatically the first time you click **Run** (you'll see a "Loading model…" spinner) and is cached for later runs.
 
 ### Troubleshooting
 
-- **First Run is slow.** The initial click loads ~5.2 GB into unified memory; the "Loading model…" and per-feature spinners mean it's working, not hung.
-- **Out of memory?** Lower `MAX_INPUT_TOKENS` to shrink the KV cache, or switch `MODEL_NAME` to the smaller [`mlx-community/granite-4.1-3b-4bit`](https://huggingface.co/mlx-community/granite-4.1-3b-4bit) (~2.1 GB of weights, and half the KV cache per token).
+- **First Run is slow.** The initial click loads ~7.3 GB into unified memory; the "Loading model…" and per-feature spinners mean it's working, not hung.
+- **Out of memory?** Lower `MAX_INPUT_TOKENS` to shrink the KV cache, or switch `MODEL_NAME` to a quantized build of the same 3B — [`ibm-granite/granite-4.2-3b-q4-mlx`](https://huggingface.co/ibm-granite/granite-4.2-3b-q4-mlx) (~2.1 GB of weights, fits an 8 GB Mac) or [`ibm-granite/granite-4.2-3b-q8-mlx`](https://huggingface.co/ibm-granite/granite-4.2-3b-q8-mlx) (~3.9 GB). Quantization changes only the weights, so the KV cache per token is the same.
 - **Interrupted download?** Re-run — downloads resume from the Hugging Face cache rather than starting over.
 
 ## Usage
@@ -54,7 +54,7 @@ cp .env.example .env
 
 ### Input length
 
-Inputs over `MAX_INPUT_TOKENS` tokens (default `16384`, max `131072`) are truncated before analysis. On a higher-memory Mac you can raise it for longer documents, but each extra token adds ~160 KB of KV cache and slows processing. Add it to `.env`, or pass it inline for a single run:
+Inputs over `MAX_INPUT_TOKENS` tokens (default `16384`, max `131072`) are truncated before analysis. On a higher-memory Mac you can raise it for longer documents, but each extra token adds ~80 KB of KV cache and slows processing. Add it to `.env`, or pass it inline for a single run:
 
 ```bash
 MAX_INPUT_TOKENS=32768 uv run streamlit run streamlit_app.py
@@ -96,4 +96,4 @@ Committing `pyproject.toml` alone fails CI at `uv sync --locked`, which cuts no 
 
 ## License
 
-This project's code is released under the [Apache License 2.0](LICENSE). The IBM Granite model it loads is distributed separately under [its own Apache 2.0 license](https://huggingface.co/ibm-granite/granite-4.1-8b) and is downloaded at runtime, not included in this repository.
+This project's code is released under the [Apache License 2.0](LICENSE). The IBM Granite model it loads is distributed separately under [its own Apache 2.0 license](https://huggingface.co/ibm-granite/granite-4.2-3b) and is downloaded at runtime, not included in this repository.
