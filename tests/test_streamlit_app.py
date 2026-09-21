@@ -1565,7 +1565,8 @@ class TestHooksConfig:
         # and the formatter is what removes them. Format first and that fix lands
         # after the last pass that would have tidied it, so the Stop gate fails
         # `ruff format --check` on a file this hook just exited 0 on. Verified
-        # against ruff 0.16.2: format-then-fix leaves "\n\ndef f():".
+        # against ruff 0.16.2 and again 0.16.8 (2026-09-21): format-then-fix
+        # leaves "\n\ndef f():".
         _, calls = self._run_format_hook(tmp_path, "mod.py")
         assert len(calls) == 2, f"expected lint then format, got {calls}"
         assert calls[0].startswith("uv run ruff check --fix "), calls
