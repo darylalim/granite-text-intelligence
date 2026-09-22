@@ -33,11 +33,10 @@
 #     vendored, which is narrower than the Google URL this replaced: it also
 #     served cyrillic, greek and vietnamese on demand, so text in those scripts
 #     now falls back to Source Sans. That covers the 12 output languages (Czech
-#     is the one that needs latin-ext) but not every possible *input*. One
-#     third-party request does survive and is not a font: page_icon=
-#     ":material/psychology:" makes Streamlit fetch that symbol's SVG favicon
-#     from fonts.gstatic.com. The Material Symbols *font* is bundled. Changing a
-#     fontFaces table needs a server restart, not a rerun.
+#     is the one that needs latin-ext) but not every possible *input*. With the
+#     favicon vendored too (static/icons/, see streamlit_app.py's _PAGE_ICON),
+#     the app now makes NO third-party request at all. Changing a fontFaces
+#     table needs a server restart, not a rerun.
 #
 # Known trade: primaryColor is also the selected tab-label and selected-chip *text*
 # color, and Blue 60 on #161616 is 3.62:1 — above the 3.0 non-text floor, below AA

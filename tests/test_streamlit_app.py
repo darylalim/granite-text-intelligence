@@ -11,6 +11,7 @@ import pytest
 
 from streamlit_app import (
     _DEFAULT_MAX_INPUT_TOKENS,
+    _PAGE_ICON,
     _SENTIMENT_COLOR,
     FEATURES,
     LABELS,
@@ -748,6 +749,65 @@ class TestEffectiveMaxTokens:
         # mid-object, so restricting this to CJK/Arabic is not enough.
         feature = FEATURES[index]
         assert _effective_max_tokens(feature, language) == feature["max_tokens"] * 2
+
+
+class TestPageIcon:
+    """The favicon is vendored, and both reasons are silent if broken.
+
+    `page_icon=":material/psychology:"` is resolved in Streamlit's *frontend*
+    to a fonts.gstatic.com URL, so the shortcut form makes the app fetch its
+    icon from Google on every cold load — the last third-party request left
+    after the theme's fonts were self-hosted. A path is inlined as a base64
+    `data:` URI instead. Neither failure announces itself: a missing file
+    leaves the tab iconless, and a shortcode just quietly phones home.
+    """
+
+    def test_the_icon_file_ships(self) -> None:
+        assert _PAGE_ICON.is_file(), (
+            f"{_PAGE_ICON} is missing; set_page_config swallows the error and the "
+            "frontend's request for it 404s, leaving the tab with no icon"
+        )
+        assert _PAGE_ICON.suffix == ".svg"
+
+    def test_the_path_is_resolved_from_the_script_not_the_cwd(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # `streamlit run /abs/path/streamlit_app.py` can be launched from any
+        # directory, so a path relative to the working directory resolves to
+        # nothing and the favicon silently disappears. Path(__file__).parent is
+        # what makes it independent of the caller's cwd.
+        monkeypatch.chdir(tmp_path)
+        assert _PAGE_ICON.is_absolute()
+        assert _PAGE_ICON.is_file()
+
+    def test_the_app_gives_streamlit_an_icon_it_can_inline(self) -> None:
+        # Reloads the module under a spy and resolves whatever it *actually*
+        # passed, rather than re-checking the constant: asserting on _PAGE_ICON
+        # alone passes even when the call site has been changed back to
+        # ":material/psychology:", since the constant would still exist and
+        # still resolve. Verified — that mutation survived the first version of
+        # this test. Resolution goes through Streamlit's own _get_favicon_string
+        # so a change in how it treats a path fails here too; a Material
+        # shortcode returns itself and is mapped to an https://fonts.gstatic.com
+        # URL by the frontend, which is what must not come back.
+        import importlib
+
+        from streamlit.commands.page_config import _get_favicon_string
+
+        import streamlit_app
+
+        with patch("streamlit.set_page_config") as spy:
+            importlib.reload(streamlit_app)
+        assert spy.call_count == 1, "the app no longer calls st.set_page_config"
+
+        favicon = _get_favicon_string(spy.call_args.kwargs["page_icon"])
+        assert favicon.startswith("data:image/svg+xml"), (
+            f"favicon resolved to {favicon[:60]!r}, not an inlined SVG data URI. "
+            "A :material/ shortcode resolves to itself and the frontend fetches it "
+            "from fonts.gstatic.com on every cold load; an 'emoji:' value is local "
+            "but renders in whichever emoji font the viewer's OS ships, which is "
+            "why the glyph is vendored instead — see CLAUDE.md, Configuration."
+        )
 
 
 class TestThemeConfig:

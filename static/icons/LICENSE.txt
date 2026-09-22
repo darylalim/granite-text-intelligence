@@ -1,0 +1,8 @@
+psychology.svg is the "psychology" icon from Google's Material Symbols
+(https://github.com/google/material-design-icons), used under the Apache
+License 2.0 — the same license as this project; its full text is in the
+LICENSE file at the repository root.
+
+The only modification is a fill="#0f62fe" attribute (IBM Blue 60, the theme's
+primary) added to the <svg> element. Upstream declares no fill, so the glyph
+defaults to black and is close to invisible on a dark browser tab strip.

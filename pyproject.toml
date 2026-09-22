@@ -5,7 +5,7 @@ description = "Streamlit application for summarization, topic, intent, and senti
 license = "Apache-2.0"
 # static/fonts/ ships IBM Plex under the OFL, so its notice is declared alongside
 # the project's own license rather than being implied by it.
-license-files = ["LICENSE", "static/fonts/LICENSE.txt"]
+license-files = ["LICENSE", "static/fonts/LICENSE.txt", "static/icons/LICENSE.txt"]
 requires-python = ">=3.12"
 dependencies = [
     "mlx-lm>=0.31,<0.32",
