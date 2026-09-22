@@ -163,6 +163,10 @@ FEATURES: list[dict[str, Any]] = [
 
 LABELS: dict[str, str] = {feature["key"]: feature["label"] for feature in FEATURES}
 
+# The combined-output tab's label. One definition: the UI suite locates the
+# results panel by it and pins its icon.
+JSON_TAB_LABEL = ":material/data_object: JSON"
+
 SAMPLE_TEXTS: dict[str, str] = {
     "Product review": (
         "I bought these wireless earbuds last month and I'm honestly impressed. The "
@@ -223,8 +227,9 @@ st.set_page_config(
     # results panels are full-width blocks in what is left; the centered layout
     # would cap both at 736 px on any display. initial_sidebar_state stays at
     # its "auto" default — expanded on desktop, collapsed at or below 768 px.
-    # "locked" and an integer width exist on 1.64 but postdate the >=1.57
-    # floor; neither may be added without joining CLAUDE.md's floor list.
+    # "locked" (1.59.0) and an integer width exist on 1.64 but postdate the
+    # >=1.57 floor; adopting either means raising the floor itself, not just
+    # listing the API — see CLAUDE.md, Dependencies.
     layout="wide",
 )
 
@@ -671,39 +676,49 @@ input_text = resolve_input(pasted, uploaded_text, sample_text)
 # A horizontal row directly under the input: the primary button at its own
 # width (stretched across a full-width main area it would be an eyesore) and
 # one caption that either says why Run is disabled — which a greyed-out button
-# cannot — or mirrors the settings the sidebar may be hiding. Exactly one
-# caption is emitted on every path, so the row's shape never changes, and it
-# reads the same widgets as the button, so the two cannot drift. The caption
-# wraps under the button below ~420 px of content width (the widest, no-feature
-# one; ~410 for the no-input one, ~355 once Run is enabled) — with the sidebar
-# open the content never drops below 404, so only the disabled-state captions
-# can wrap, and only in a 864–877 px window (measured).
+# cannot — or mirrors the settings the sidebar may be hiding. The disabled
+# reason is computed once and drives both the button and the caption, so a
+# condition added to one cannot be missing from the other; a single caption
+# call keeps the row's shape fixed at [button, caption]. The caption wraps
+# under the button below ~420 px of content width (the widest, no-feature one;
+# ~410 for the no-input one, ~355 once Run is enabled) — with the sidebar open
+# the content never drops below 404, so only the disabled-state captions can
+# wrap, and only in a 864–877 px window (measured).
 n_enabled = sum(enabled.values())
+if not input_text:
+    blocker: str | None = "Paste text, upload a file or pick a sample to enable Run."
+elif not n_enabled:
+    blocker = "Turn on at least one feature in the sidebar to enable Run."
+else:
+    blocker = None
 with st.container(horizontal=True, vertical_alignment="center"):
     run = st.button(
         "Run",
         type="primary",
         icon=":material/play_arrow:",
-        disabled=not (input_text and n_enabled),
+        disabled=blocker is not None,
         key="run",
     )
-    if not input_text:
-        st.caption("Paste text, upload a file or pick a sample to enable Run.")
-    elif not n_enabled:
-        st.caption("Turn on at least one feature in the sidebar to enable Run.")
-    else:
-        st.caption(
-            f"{n_enabled} of {len(FEATURES)} features · Output language: {language}"
-        )
+    st.caption(
+        blocker
+        or f"{n_enabled} of {len(FEATURES)} features · Output language: {language}"
+    )
 
 # ---- Results: full width, below the Run row ----
 # Full width rather than a column: the tab strip below needs ~378 CSS px of
-# label, and a full-width panel clears that at every viewport with the sidebar
-# open or closed — 404 px at the 864 px worst case (measured) — which is what
-# retired the 2:3 column split that used to buy the room. One wrapper
-# container, so the three reserved slots are its only children, at fixed
-# indices 0/1/2 whatever is emitted above it on the page
-# (TestResultsPanelStructure asserts exactly that shape).
+# label, and a full-width panel clears that at every desktop viewport with the
+# sidebar open or closed — 404 px at the 864 px worst case (measured; only a
+# phone-width window under ~410 px, where the 16 px padding leaves less, still
+# clips, and no Mac window is that narrow) — which is what retired the 2:3
+# column split that used to buy the room. The one way back to a clipped strip
+# is the sidebar itself: it is user-draggable and its width is remembered, so
+# past ~463 px at a 1000 px window the strip collapses on every later load;
+# the 1.64 options that could bound it are post-floor (see set_page_config).
+# The wrapper container makes the panel one addressable block — one `with`,
+# one node whose children TestResultsPanelStructure pins as exactly [status,
+# notices, tabs]. It does not protect against something emitted above it at
+# top level: that moves the wrapper and remounts everything inside, which is
+# why the same test also pins the main area's top-level shape.
 with st.container():
     # Claim this panel's slots *before* the run, and fill them after. Two wins,
     # neither of which the spinners provide — st.spinner enqueues on a
@@ -731,7 +746,7 @@ with st.container():
     notice_slot = st.empty()
     tabs = st.tabs(
         [
-            ":material/data_object: JSON",
+            JSON_TAB_LABEL,
             *[f"{feature['icon']} {feature['tab_label']}" for feature in FEATURES],
         ]
     )
@@ -772,7 +787,7 @@ with st.container():
         with notice_slot.container():
             if results["truncated"]:
                 st.warning(
-                    f"Input was truncated to the first {MAX_INPUT_TOKENS} tokens.",
+                    f"Input was truncated to the first {MAX_INPUT_TOKENS:,} tokens.",
                     icon=":material/content_cut:",
                 )
             current_signature = _run_signature(input_text, enabled, language)

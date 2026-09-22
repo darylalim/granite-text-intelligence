@@ -4,10 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import streamlit as st
-from streamlit.proto.Block_pb2 import Block
 from streamlit.testing.v1 import AppTest
 
-from streamlit_app import FEATURES, MAX_INPUT_TOKENS, SAMPLE_TEXTS
+from streamlit_app import FEATURES, JSON_TAB_LABEL, MAX_INPUT_TOKENS, SAMPLE_TEXTS
 
 APP = str(Path(__file__).parent.parent / "streamlit_app.py")
 
@@ -122,7 +121,8 @@ class TestUIPolish:
     def test_result_tabs_derive_from_features_with_icons(self) -> None:
         at = AppTest.from_file(APP).run()
         labels = {tab.label for tab in at.tabs}
-        assert ":material/data_object: JSON" in labels
+        assert JSON_TAB_LABEL in labels
+        assert JSON_TAB_LABEL.startswith(":material/")
         # Each feature's result tab label is composed as "<icon> <tab_label>", so
         # this reads both from FEATURES and breaks if the composition regresses.
         for feature in FEATURES:
@@ -133,7 +133,6 @@ class TestUIPolish:
         assert at.button(key="run").icon == ":material/play_arrow:"
 
 
-JSON_TAB = ":material/data_object: JSON"
 TOP_LEVEL_KINDS = ["title", "tab_container", "flex_container", "flex_container"]
 
 
@@ -151,7 +150,7 @@ def _results_panel(at: AppTest):
             if getattr(child, "type", "") != "tab_container":
                 continue
             labels = {getattr(t, "label", None) for t in child.children.values()}
-            if JSON_TAB in labels:
+            if JSON_TAB_LABEL in labels:
                 return block
     raise AssertionError("results panel not found")
 
@@ -314,28 +313,38 @@ class TestRunRow:
         expected = f"{n - 2} of {n} features · Output language: German"
         assert [c.value for c in _run_row(at).caption] == [expected]
 
+    @staticmethod
+    def _assert_row_shape(at: AppTest) -> None:
+        # Checked immediately after each run: `at` is one mutable object, so
+        # collecting it per state and asserting afterwards would test the last
+        # state three times (which is how a first version of this test passed
+        # with both disabled-state captions removed). The proto import is local
+        # on purpose: it is a private Streamlit path used by this one check, so
+        # an upstream rename fails this test rather than the whole module.
+        from streamlit.proto.Block_pb2 import Block
+
+        row = _run_row(at)
+        assert [c.type for c in row.children.values()] == ["button", "caption"]
+        assert (
+            row.proto.flex_container.direction
+            == Block.FlexContainer.Direction.HORIZONTAL
+        )
+
     def test_row_is_button_then_caption_in_every_state(self) -> None:
         # [button, caption] in all three states, in a *horizontal* container —
         # a vertical one has the same node kinds and would drop the caption
         # under the button on every viewport.
         at = AppTest.from_file(APP)
         at.run()
-        states = [at]
+        self._assert_row_shape(at)  # no input
         at.text_area(key="paste").set_value("Some text.")
         for feature in FEATURES:
             at.toggle(key=f"feature_{feature['key']}").set_value(False)
         at.run()
-        states.append(at)
+        self._assert_row_shape(at)  # input, every feature off
         at.toggle(key="feature_sentiment").set_value(True)
         at.run()
-        states.append(at)
-        for state in states:
-            row = _run_row(state)
-            assert [c.type for c in row.children.values()] == ["button", "caption"]
-            assert (
-                row.proto.flex_container.direction
-                == Block.FlexContainer.Direction.HORIZONTAL
-            )
+        self._assert_row_shape(at)  # enabled
 
 
 class TestRunInteraction:
@@ -438,7 +447,8 @@ class TestRunInteraction:
         at.button(key="run").click().run()
 
         assert not at.exception
-        assert any(str(MAX_INPUT_TOKENS) in warning.value for warning in at.warning)
+        # Thousands-separated, the same rendering as the sidebar's cap caption.
+        assert any(f"{MAX_INPUT_TOKENS:,}" in warning.value for warning in at.warning)
 
     def test_language_change_flags_inputs_changed(
         self, patched_model: MagicMock
