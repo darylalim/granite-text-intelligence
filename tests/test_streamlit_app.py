@@ -468,20 +468,34 @@ class TestRunFeature:
 
 
 class TestRenderResult:
-    @pytest.mark.parametrize(
-        "key, parsed",
-        [
-            pytest.param("intents", {"intent": ["a", "b"]}, id="intent-list"),
-            pytest.param("sentiment", {"sentiment": {"x": 1}}, id="sentiment-dict"),
-        ],
-    )
     @patch("streamlit_app.st")
-    def test_metric_value_coerced_to_string(
-        self, mock_st: MagicMock, key: str, parsed: dict
-    ) -> None:
-        render_result(key, {"raw": "x", "parsed": parsed})
+    def test_metric_value_coerced_to_string(self, mock_st: MagicMock) -> None:
+        render_result("sentiment", {"raw": "x", "parsed": {"sentiment": {"x": 1}}})
         _, value = mock_st.metric.call_args[0]
         assert isinstance(value, str)
+
+    @patch("streamlit_app.st")
+    def test_intent_is_a_wrapping_subheader_not_a_metric(
+        self, mock_st: MagicMock
+    ) -> None:
+        # A metric value is one ellipsized line; the intent is free text, and
+        # a real one ran to 133 characters. Captioned first, then the value.
+        intent = (
+            "The author wants to inform about the city council's decision to "
+            "expand the bike-lane network and its expected benefits and concerns."
+        )
+        render_result("intents", {"raw": "x", "parsed": {"intent": intent}})
+        mock_st.metric.assert_not_called()
+        assert [c[0] for c in mock_st.method_calls] == ["caption", "subheader"]
+        mock_st.caption.assert_called_once_with("Intent")
+        mock_st.subheader.assert_called_once_with(
+            _escape_markdown(intent), anchor=False
+        )
+
+    @patch("streamlit_app.st")
+    def test_intent_value_coerced_to_string(self, mock_st: MagicMock) -> None:
+        render_result("intents", {"raw": "x", "parsed": {"intent": ["a", "b"]}})
+        assert isinstance(mock_st.subheader.call_args[0][0], str)
 
     @patch("streamlit_app.st")
     def test_non_list_topics_not_sent_to_dataframe(self, mock_st: MagicMock) -> None:
@@ -521,21 +535,22 @@ class TestRenderResult:
         mock_st.write.assert_not_called()
         mock_st.markdown.assert_not_called()
 
-    @pytest.mark.parametrize(
-        "key, parsed",
-        [
-            pytest.param("intents", {"intent": FREE_TEXT}, id="intent"),
-            pytest.param("sentiment", {"sentiment": FREE_TEXT}, id="out-of-enum"),
-        ],
-    )
     @patch("streamlit_app.st")
-    def test_metric_value_is_markdown_escaped(
-        self, mock_st: MagicMock, key: str, parsed: dict
+    def test_out_of_enum_sentiment_is_markdown_escaped(
+        self, mock_st: MagicMock
     ) -> None:
         # A metric value is always Markdown, so model text there is escaped.
-        render_result(key, {"raw": "x", "parsed": parsed})
+        render_result(
+            "sentiment", {"raw": "x", "parsed": {"sentiment": self.FREE_TEXT}}
+        )
         _, value = mock_st.metric.call_args[0]
         assert value == _escape_markdown(self.FREE_TEXT)
+
+    @patch("streamlit_app.st")
+    def test_intent_is_markdown_escaped(self, mock_st: MagicMock) -> None:
+        # st.subheader parses Markdown too.
+        render_result("intents", {"raw": "x", "parsed": {"intent": self.FREE_TEXT}})
+        assert mock_st.subheader.call_args[0][0] == _escape_markdown(self.FREE_TEXT)
 
     @patch("streamlit_app.st")
     def test_non_numeric_confidence_is_markdown_escaped(

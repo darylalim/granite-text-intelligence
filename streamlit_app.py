@@ -483,12 +483,13 @@ def _escape_markdown(text: str) -> str:
     """Backslash-escape `text` so a Markdown-parsing element shows it literally.
 
     For model output that has to reach an element with no plain-text mode —
-    an `st.metric` value, an `st.caption` — where free text is otherwise read
-    as Markdown: a pair of dollar amounts in one line becomes inline math and
-    loses both `$` signs, and an echoed `![x](https://…)` renders an <img> the
-    browser fetches. Streamlit ships no public escape helper. Where an element
-    that does no parsing fits (the summary, the rationales), `st.text` is used
-    instead and nothing needs escaping.
+    an `st.metric` value, an `st.subheader`, an `st.caption` — where free text
+    is otherwise read as Markdown: a pair of dollar amounts in one line
+    becomes inline math and loses both `$` signs, and an echoed
+    `![x](https://…)` renders an <img> the browser fetches. Streamlit ships no
+    public escape helper. Where an element that does no parsing fits (the
+    summary, the rationales), `st.text` is used instead and nothing needs
+    escaping.
     """
     return _MARKDOWN_SPECIAL.sub(r"\\\1", text)
 
@@ -605,8 +606,14 @@ def render_result(key: str, result: dict[str, Any]) -> None:
         else:
             st.caption("No topics found.")
     elif key == "intents":
-        # A metric value is always Markdown; there is no switch to turn it off.
-        st.metric("Intent", _escape_markdown(str(parsed.get("intent", "—"))))
+        # Not st.metric: the intent is free text — anything from a snake_case
+        # label to a 130-character sentence — and a metric value is one
+        # ellipsized line with no tooltip, so 4 of the 12 recorded smoke-test
+        # intents were cut off at a 1000 px window. A subheader wraps. It still
+        # parses Markdown (no switch to turn that off), hence the escape, and
+        # anchor=False keeps a model-worded heading from offering a link icon.
+        st.caption("Intent")
+        st.subheader(_escape_markdown(str(parsed.get("intent", "—"))), anchor=False)
         _render_confidence(parsed)
         if parsed.get("rationale"):
             st.text(str(parsed["rationale"]), width="stretch")
