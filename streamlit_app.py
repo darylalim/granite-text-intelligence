@@ -219,9 +219,12 @@ _LOCALIZED_TOKEN_MULTIPLIER = 2
 st.set_page_config(
     page_title="Granite Text Intelligence",
     page_icon=":material/psychology:",
-    # Wide, because the results panel is only half the page and carries five
-    # icon-prefixed tabs; at the centered width they overflow into a scrolling
-    # strip that hides whichever label is furthest from the active one.
+    # Wide, because the sidebar takes 300 px of the viewport and the input and
+    # results panels are full-width blocks in what is left; the centered layout
+    # would cap both at 736 px on any display. initial_sidebar_state stays at
+    # its "auto" default — expanded on desktop, collapsed at or below 768 px.
+    # "locked" and an integer width exist on 1.64 but postdate the >=1.57
+    # floor; neither may be added without joining CLAUDE.md's floor list.
     layout="wide",
 )
 
@@ -529,7 +532,7 @@ def render_result(key: str, result: dict[str, Any]) -> None:
         # whole purpose is showing what the model actually said — and claiming
         # "json" would be a guess, since this branch runs precisely because the
         # output did not parse. wrap_lines keeps a long single-line response
-        # inside the results column instead of scrolling it sideways.
+        # inside the results panel instead of scrolling it sideways.
         st.code(raw, language=None, wrap_lines=True)
         return
     if key == "topics":
@@ -594,6 +597,39 @@ def _preview(text: str) -> None:
         st.text(text, width="stretch")
 
 
+# ---- Sidebar: run settings, nothing the reader acts on ----
+# The sidebar holds what changes *how* a run behaves — which features, which
+# output language — plus one line of app metadata, and nothing the user reads
+# or clicks to make things happen. Run is deliberately not here: the sidebar
+# collapses (automatically at or below 768 px, and a manual collapse persists
+# in localStorage on 1.64), and the primary action must never sit behind a
+# chevron. In this vertical container the toggle labels wrap normally and
+# carry no native title tooltip, unlike their old placement directly in a
+# column; the Run row below is the one control that rule still touches.
+with st.sidebar:
+    st.subheader("Features")
+    enabled: dict[str, bool] = {
+        feature["key"]: st.toggle(
+            feature["label"],
+            value=True,
+            help=feature["help"],
+            key=f"feature_{feature['key']}",
+        )
+        for feature in FEATURES
+    }
+    # Output language is global (applies to every feature), so it sits with
+    # the other run settings; the sidebar's own width is the constraint the
+    # old st.columns([1, 2]) existed to provide.
+    language = st.selectbox("Output language", LANGUAGES, key="language")
+    # Small app metadata — the one non-setting a sidebar should carry: the
+    # model whose output the page shows (short name; the full id wraps to
+    # three lines at the default sidebar width) and the cap the truncation
+    # warning refers to.
+    st.caption(
+        f"Model: {MODEL_NAME.rsplit('/', 1)[-1]} · "
+        f"input capped at {MAX_INPUT_TOKENS:,} tokens"
+    )
+
 st.title("Granite Text Intelligence")
 
 # ---- Input: Text > Upload > Sample (first non-empty wins) ----
@@ -631,49 +667,52 @@ with sample_tab:
 
 input_text = resolve_input(pasted, uploaded_text, sample_text)
 
-# Output language is global (applies to every feature), so it sits with the input
-# rather than in the per-feature column; constrained to a third of the width.
-language_col, _ = st.columns([1, 2])
-language = language_col.selectbox("Output language", LANGUAGES, key="language")
-
-# ---- Features (left) and Results (right) ----
-# 2:3, not 2:2. The results panel carries five icon-prefixed tabs needing
-# ~377 CSS px of label; an even split made that a function of window width, so
-# the strip still collapsed into a scrolling chevron in any narrow window even
-# under layout="wide" — it moved the threshold rather than removing it. The
-# features column holds four toggles and one button and does not need half the
-# page, so giving the results 3/5 buys the room structurally.
-features_column, results_column = st.columns([2, 3])
-
-with features_column:
-    st.subheader("Features")
-    enabled: dict[str, bool] = {
-        feature["key"]: st.toggle(
-            feature["label"],
-            value=True,
-            help=feature["help"],
-            key=f"feature_{feature['key']}",
-        )
-        for feature in FEATURES
-    }
+# ---- Run: stays with the input it acts on ----
+# A horizontal row directly under the input: the primary button at its own
+# width (stretched across a full-width main area it would be an eyesore) and
+# one caption that either says why Run is disabled — which a greyed-out button
+# cannot — or mirrors the settings the sidebar may be hiding. Exactly one
+# caption is emitted on every path, so the row's shape never changes, and it
+# reads the same widgets as the button, so the two cannot drift. The caption
+# wraps under the button below ~420 px of content width (the widest, no-feature
+# one; ~410 for the no-input one, ~355 once Run is enabled) — with the sidebar
+# open the content never drops below 404, so only the disabled-state captions
+# can wrap, and only in a 864–877 px window (measured).
+n_enabled = sum(enabled.values())
+with st.container(horizontal=True, vertical_alignment="center"):
     run = st.button(
         "Run",
         type="primary",
         icon=":material/play_arrow:",
-        width="stretch",
-        disabled=not (input_text and any(enabled.values())),
+        disabled=not (input_text and n_enabled),
         key="run",
     )
+    if not input_text:
+        st.caption("Paste text, upload a file or pick a sample to enable Run.")
+    elif not n_enabled:
+        st.caption("Turn on at least one feature in the sidebar to enable Run.")
+    else:
+        st.caption(
+            f"{n_enabled} of {len(FEATURES)} features · Output language: {language}"
+        )
 
-with results_column:
+# ---- Results: full width, below the Run row ----
+# Full width rather than a column: the tab strip below needs ~378 CSS px of
+# label, and a full-width panel clears that at every viewport with the sidebar
+# open or closed — 404 px at the 864 px worst case (measured) — which is what
+# retired the 2:3 column split that used to buy the room. One wrapper
+# container, so the three reserved slots are its only children, at fixed
+# indices 0/1/2 whatever is emitted above it on the page
+# (TestResultsPanelStructure asserts exactly that shape).
+with st.container():
     # Claim this panel's slots *before* the run, and fill them after. Two wins,
     # neither of which the spinners provide — st.spinner enqueues on a
     # *transient* cursor that never advances the real delta path:
     #
-    # 1. The tab block now sits at a fixed child index. It used to follow the
-    #    two conditional notices, so its delta path shifted between 0, 1 and 2
-    #    as they appeared and disappeared; landing on a path previously held by
-    #    a different node remounts the block and silently resets the user's
+    # 1. The tab block sits at a fixed child index. It used to follow the two
+    #    conditional notices, so its delta path shifted between 0, 1 and 2 as
+    #    they appeared and disappeared; landing on a path previously held by a
+    #    different node remounts the block and silently resets the user's
     #    selected tab.
     # 2. The tab bar paints immediately rather than waiting out a 7.3 GB model
     #    load plus up to four generations.
@@ -685,7 +724,9 @@ with results_column:
     # whole of a run it no longer describes. st.empty() clears at the top of
     # the rerun instead; the child container is what lets one slot hold both
     # notices. The results themselves are unavoidably the previous run's until
-    # inference returns, which is why the tab bodies stay below.
+    # inference returns, which is why the tab bodies stay below. Sitting
+    # directly under the Run row, the notices land next to the button they
+    # tell the user to click.
     status_slot = st.container()
     notice_slot = st.empty()
     tabs = st.tabs(
@@ -754,7 +795,7 @@ with results_column:
             )
         else:
             st.info(
-                "Choose features and click Run to see results here.",
+                "Choose features in the sidebar and click Run to see results here.",
                 icon=":material/play_circle:",
             )
 

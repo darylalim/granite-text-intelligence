@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import streamlit as st
+from streamlit.proto.Block_pb2 import Block
 from streamlit.testing.v1 import AppTest
 
 from streamlit_app import FEATURES, MAX_INPUT_TOKENS, SAMPLE_TEXTS
@@ -86,7 +87,10 @@ class TestInitialRender:
     def test_pre_run_prompt_shown(self) -> None:
         at = AppTest.from_file(APP).run()
         assert at.session_state["results"] is None
-        assert any("click Run" in info.value for info in at.info)
+        assert any(
+            "in the sidebar" in info.value and "click Run" in info.value
+            for info in at.info
+        )
 
     def test_language_selectbox_defaults_to_match_input(self) -> None:
         at = AppTest.from_file(APP).run()
@@ -129,6 +133,41 @@ class TestUIPolish:
         assert at.button(key="run").icon == ":material/play_arrow:"
 
 
+JSON_TAB = ":material/data_object: JSON"
+TOP_LEVEL_KINDS = ["title", "tab_container", "flex_container", "flex_container"]
+
+
+def _results_panel(at: AppTest):
+    """The wrapper container holding the result tabs, pre- or post-run.
+
+    Found by content — the top-level block of `at.main` whose `tab_container`
+    child carries the JSON tab — rather than by index or by the notices slot's
+    kind: the input tabs are a top-level `tab_container` too (so a wrapper
+    someone later puts around *them* must not match), and the notices slot is
+    an `empty` only until the first run fills it with a container.
+    """
+    for block in at.main.children.values():
+        for child in getattr(block, "children", {}).values():
+            if getattr(child, "type", "") != "tab_container":
+                continue
+            labels = {getattr(t, "label", None) for t in child.children.values()}
+            if JSON_TAB in labels:
+                return block
+    raise AssertionError("results panel not found")
+
+
+def _run_row(at: AppTest):
+    """The horizontal container holding Run — located by the button, not by
+    being the first `flex_container` in main, which a plain `st.container()`
+    around the input tabs would also be."""
+    for block in at.main.children.values():
+        if getattr(block, "type", "") == "flex_container" and any(
+            button.key == "run" for button in block.button
+        ):
+            return block
+    raise AssertionError("Run row not found")
+
+
 class TestResultsPanelStructure:
     """The results panel's emission order, which nothing else pins.
 
@@ -139,27 +178,164 @@ class TestResultsPanelStructure:
     since this run" note stays readable for the length of the next run.
     """
 
-    @staticmethod
-    def _results_column(at: AppTest):
-        """The column holding the result tabs (the input tabs sit above it)."""
-        for block in at.main.children.values():
-            for column in getattr(block, "children", {}).values():
-                kinds = [
-                    getattr(child, "type", "")
-                    for child in getattr(column, "children", {}).values()
-                ]
-                if "tab_container" in kinds:
-                    return column
-        raise AssertionError("results column not found")
-
     def test_slots_are_reserved_before_the_tabs(self) -> None:
         at = AppTest.from_file(APP).run()
-        column = self._results_column(at)
-        kinds = [child.type for child in column.children.values()]
+        kinds = [child.type for child in _results_panel(at).children.values()]
         # status slot, notice slot, then the tabs — the tabs must come last of
         # the three so their index cannot shift, and the notice slot must be an
-        # `empty` (a container would preserve the previous run's note).
+        # `empty` (a container would preserve the previous run's note). The
+        # wrapper must hold nothing else: an unconditional extra sibling would
+        # be a fourth kind here (a conditional one is what the post-run test
+        # below is for).
         assert kinds == ["flex_container", "empty", "tab_container"]
+
+    def test_panel_is_the_fourth_top_level_block(self) -> None:
+        # The panel's own delta path is [main, 3]: fixed only as long as the
+        # three blocks above it (title, input tabs, Run row) are unconditional
+        # and nothing is emitted between them. A stray top-level element moves
+        # the whole panel and remounts it — the finder above would still find
+        # the panel, so this is the assertion that sees the move.
+        at = AppTest.from_file(APP).run()
+        assert [b.type for b in at.main.children.values()] == TOP_LEVEL_KINDS
+        assert _results_panel(at) is at.main.children[3]
+
+    def test_notices_fill_the_reserved_slot_after_a_run(
+        self, patched_model: MagicMock
+    ) -> None:
+        # After a run the notices go *into* slot 1 (the empty, now holding a
+        # container) and the tabs stay last at index 2. Emitting the notices
+        # into a fresh sibling — or any element gated on `results is not None`
+        # between the slot and the tabs — passes the pre-run test above and
+        # fails here, because both only exist once results do.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Original text.")
+        at.run()
+        at.button(key="run").click().run()
+        panel = _results_panel(at)
+        assert [c.type for c in panel.children.values()] == [
+            "flex_container",
+            "flex_container",
+            "tab_container",
+        ]
+        at.text_area(key="paste").set_value("Different text now.")
+        at.run()  # edited input, but Run not clicked again
+        panel = _results_panel(at)
+        assert [c.type for c in panel.children.values()] == [
+            "flex_container",
+            "flex_container",
+            "tab_container",
+        ]
+        assert any("Inputs changed" in i.value for i in panel.children[1].info)
+
+
+class TestSidebarLayout:
+    """Settings in the sidebar, the action in the main area — no model needed.
+
+    The toggles and the output language are run *settings*, which is what a
+    sidebar is for; Run is the primary action and must never sit behind the
+    chevron of a collapsed sidebar (auto-collapsed at narrow widths, and a
+    manual collapse persists in localStorage). AppTest's root tree is
+    `[main, sidebar, event]`, so the scoped accessors are what make placement
+    assertable at all — every `at.<widget>` lookup spans the whole tree.
+    """
+
+    def test_settings_live_in_the_sidebar(self) -> None:
+        at = AppTest.from_file(APP).run()
+        assert len(at.sidebar.toggle) == len(FEATURES)
+        assert at.sidebar.selectbox(key="language").value == "Match input"
+        assert len(at.main.toggle) == 0
+        assert len(at.main.selectbox) == 0
+
+    def test_run_stays_in_the_main_area(self) -> None:
+        at = AppTest.from_file(APP).run()
+        assert len(at.sidebar.button) == 0
+        assert at.main.button(key="run").icon == ":material/play_arrow:"
+
+    def test_run_is_a_primary_button_at_its_natural_width(self) -> None:
+        # AppTest's tree cannot see width: the Button node wraps the inner
+        # proto and `width_config` lives on the outer Element. So the call is
+        # spied instead — `st.button` resolves the module attribute at call
+        # time, and the script is re-executed under the patch.
+        real_button = st.button
+        with patch("streamlit.button", wraps=real_button) as spy:
+            at = AppTest.from_file(APP).run()
+        assert at.main.button(key="run").proto.type == "primary"
+        run_call = next(c for c in spy.call_args_list if c.kwargs.get("key") == "run")
+        assert run_call.kwargs.get("width", "content") == "content"
+
+
+class TestRunRow:
+    """The caption beside Run: why it is disabled, or what a click will run.
+
+    A greyed-out button says nothing about why; with the toggles and language
+    in a sidebar that may be collapsed, the caption is the one place the main
+    area states what a click would do. One caption on every path keeps the
+    row's own shape constant — button, then one line beside it — so the
+    explanation is always next to the control it explains. (The row's
+    contents cannot move the results panel below it; that index is pinned by
+    `TestResultsPanelStructure`.)
+    """
+
+    def test_no_input_names_the_input_sources(self) -> None:
+        at = AppTest.from_file(APP).run()
+        assert at.button(key="run").disabled is True
+        caption = next(c.value for c in _run_row(at).caption)
+        for phrase in ("Paste text", "upload a file", "pick a sample"):
+            assert phrase in caption
+
+    def test_all_features_off_names_the_sidebar(self) -> None:
+        # The one disabled state that has input: nothing covered it before.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Some text.")
+        for feature in FEATURES:
+            at.toggle(key=f"feature_{feature['key']}").set_value(False)
+        at.run()
+        assert at.button(key="run").disabled is True
+        caption = next(c.value for c in _run_row(at).caption)
+        assert "at least one feature" in caption
+        assert "in the sidebar" in caption
+
+    def test_enabled_caption_mirrors_the_settings(self) -> None:
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Some text.")
+        at.toggle(key="feature_summary").set_value(False)
+        at.selectbox(key="language").set_value("German")
+        at.run()
+        assert at.button(key="run").disabled is False
+        n = len(FEATURES)
+        expected = f"{n - 1} of {n} features · Output language: German"
+        assert [c.value for c in _run_row(at).caption] == [expected]
+        # A second data point, so a hardcoded count cannot pass.
+        at.toggle(key="feature_topics").set_value(False)
+        at.run()
+        expected = f"{n - 2} of {n} features · Output language: German"
+        assert [c.value for c in _run_row(at).caption] == [expected]
+
+    def test_row_is_button_then_caption_in_every_state(self) -> None:
+        # [button, caption] in all three states, in a *horizontal* container —
+        # a vertical one has the same node kinds and would drop the caption
+        # under the button on every viewport.
+        at = AppTest.from_file(APP)
+        at.run()
+        states = [at]
+        at.text_area(key="paste").set_value("Some text.")
+        for feature in FEATURES:
+            at.toggle(key=f"feature_{feature['key']}").set_value(False)
+        at.run()
+        states.append(at)
+        at.toggle(key="feature_sentiment").set_value(True)
+        at.run()
+        states.append(at)
+        for state in states:
+            row = _run_row(state)
+            assert [c.type for c in row.children.values()] == ["button", "caption"]
+            assert (
+                row.proto.flex_container.direction
+                == Block.FlexContainer.Direction.HORIZONTAL
+            )
 
 
 class TestRunInteraction:
