@@ -79,10 +79,25 @@ def patched_model(fake_tokenizer: MagicMock) -> Iterator[MagicMock]:
 class TestInitialRender:
     """The first paint, before any Run — needs no model."""
 
-    def test_run_disabled_without_input(self) -> None:
-        at = AppTest.from_file(APP).run()
-        assert at.button(key="run").disabled is True
+    def test_run_enabled_without_input_and_a_click_only_warns(self) -> None:
+        # Run is not disabled for missing input: st.text_area commits only on
+        # blur, so a Run disabled on the committed value swallowed the first
+        # click after a paste (a browser-only effect — AppTest's set_value
+        # commits at once). A click with nothing to analyze warns instead, and
+        # loads nothing, generates nothing and stores nothing.
+        with (
+            patch("mlx_lm.load") as load,
+            patch("mlx_lm.generate") as generate,
+        ):
+            at = AppTest.from_file(APP).run()
+            assert at.button(key="run").disabled is False
+            at.button(key="run").click().run()
         assert not at.exception
+        status_slot = _results_panel(at).children[0]
+        assert any("Nothing to analyze" in w.value for w in status_slot.warning)
+        assert at.session_state["results"] is None
+        load.assert_not_called()
+        generate.assert_not_called()
 
     def test_features_default_on(self) -> None:
         at = AppTest.from_file(APP).run()
@@ -272,7 +287,8 @@ class TestSidebarLayout:
 
 
 class TestRunRow:
-    """The caption beside Run: why it is disabled, or what a click will run.
+    """The caption beside Run: why it is disabled, what to do before clicking,
+    or what a click will run.
 
     A greyed-out button says nothing about why; with the toggles and language
     in a sidebar that may be collapsed, the caption is the one place the main
@@ -284,20 +300,30 @@ class TestRunRow:
     """
 
     def test_no_input_names_the_input_sources(self) -> None:
+        # An instruction, not a reason: Run stays enabled without input (see
+        # TestInitialRender), so the caption says what to do, then to click.
         at = AppTest.from_file(APP).run()
-        assert at.button(key="run").disabled is True
+        assert at.button(key="run").disabled is False
         caption = next(c.value for c in _run_row(at).caption)
-        for phrase in ("Paste text", "upload a file", "pick a sample"):
+        for phrase in ("Paste text", "upload a file", "pick a sample", "click Run"):
             assert phrase in caption
 
     def test_all_features_off_names_the_sidebar(self) -> None:
-        # The one disabled state that has input: nothing covered it before.
+        # The one disabled state, with or without input — and its reason wins
+        # over the no-input instruction, since a disabled button's caption
+        # must say why it is disabled.
         at = AppTest.from_file(APP)
         at.run()
-        at.text_area(key="paste").set_value("Some text.")
         for feature in FEATURES:
             at.toggle(key=f"feature_{feature['key']}").set_value(False)
         at.run()
+        self._assert_names_the_sidebar(at)  # no input
+        at.text_area(key="paste").set_value("Some text.")
+        at.run()
+        self._assert_names_the_sidebar(at)  # input
+
+    @staticmethod
+    def _assert_names_the_sidebar(at: AppTest) -> None:
         assert at.button(key="run").disabled is True
         caption = next(c.value for c in _run_row(at).caption)
         assert "at least one feature" in caption
@@ -357,12 +383,44 @@ class TestRunRow:
 class TestRunInteraction:
     """The Run path and results panel — model mocked at the mlx_lm boundary."""
 
-    def test_run_enables_once_text_entered(self) -> None:
+    def test_paste_and_click_in_one_rerun_runs_the_paste(
+        self, patched_model: MagicMock
+    ) -> None:
+        # In a browser the click on Run is what blurs a just-pasted text area,
+        # and the blur's commit and the click arrive in the same rerun. Setting
+        # the value and clicking with no run in between is that rerun: the
+        # pasted text must be what one click analyzes.
         at = AppTest.from_file(APP)
         at.run()
         at.text_area(key="paste").set_value("Some text to analyze.")
+        at.button(key="run").click().run()
+        assert not at.exception
+        assert at.session_state["results"]["signature"][0] == "Some text to analyze."
+
+    def test_empty_click_after_a_run_keeps_the_results(
+        self, patched_model: MagicMock
+    ) -> None:
+        # The no-input warning touches nothing else: the previous run's
+        # results stand (flagged stale, since the input changed) and the
+        # panel keeps its shape.
+        at = AppTest.from_file(APP)
         at.run()
-        assert at.button(key="run").disabled is False
+        at.text_area(key="paste").set_value("Some text.")
+        at.run()
+        at.button(key="run").click().run()
+        before = at.session_state["results"]
+        at.text_area(key="paste").set_value("")
+        at.button(key="run").click().run()
+        assert not at.exception
+        assert at.session_state["results"] == before
+        panel = _results_panel(at)
+        assert [c.type for c in panel.children.values()] == [
+            "flex_container",
+            "flex_container",
+            "tab_container",
+        ]
+        assert any("Nothing to analyze" in w.value for w in panel.children[0].warning)
+        assert any("Inputs changed" in i.value for i in panel.children[1].info)
 
     def test_run_populates_results(self, patched_model: MagicMock) -> None:
         at = AppTest.from_file(APP)

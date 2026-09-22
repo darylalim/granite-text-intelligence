@@ -17,9 +17,10 @@
 #     Streamlit derives the text variant by lightening on dark and darkening on
 #     light, which turned this theme's earlier incarnation's Red 50 into a salmon
 #     #fc979c. Pinned, the metric renders the Carbon token itself. Yellow is in the
-#     set for a different reason: it is what st.warning renders in — the app's one
-#     alert, for truncated input and unparseable JSON — and its derived light-mode
-#     text is 2.59:1 over its own tint, which no sentiment check would have seen.
+#     set for a different reason: it is what st.warning renders in — every warning
+#     the app shows (no input, truncated input, output that would not parse or
+#     render) — and its derived light-mode text is 2.59:1 over its own tint, which
+#     no sentiment check would have seen.
 #   * baseFontSize = 15. IBM Plex Sans at the 16 px root sets the five-tab results
 #     strip at 397 px against a 404 px floor; at 15 it measures 372 px of 414. It
 #     rescales every rem dimension with it (run row 37.5 px, wide padding 75 px).
@@ -174,8 +175,9 @@ violetColor = "#8a3ffc"                    # Purple 60
 yellowColor = "#f1c21b"                    # Yellow 30, support-warning — st.warning's tint
 yellowTextColor = "#684e00"                # Yellow 70. Pinned because the DERIVED value
                                            # (#b6910c) measures 2.59:1 over the 10%-opacity
-                                           # tint st.warning composites onto Gray 10 — the
-                                           # app's one alert, unreadable. Yellow 70 is 6.81:1.
+                                           # tint st.warning composites onto Gray 10, which
+                                           # would leave every warning the app shows
+                                           # unreadable. Yellow 70 is 6.81:1.
 
 # The same rule in the other direction: the rail at the tonal extreme, fields at Gray 10
 [theme.light.sidebar]

@@ -744,22 +744,40 @@ input_text = resolve_input(pasted, uploaded_text, sample_text)
 # ---- Run: stays with the input it acts on ----
 # A horizontal row directly under the input: the primary button at its own
 # width (stretched across a full-width main area it would be an eyesore) and
-# one caption that either says why Run is disabled — which a greyed-out button
-# cannot — or mirrors the settings the sidebar may be hiding. The disabled
-# reason is computed once and drives both the button and the caption, so a
-# condition added to one cannot be missing from the other; a single caption
-# call keeps the row's shape fixed at [button, caption]. The caption wraps
-# under the button below ~420 px of content width (the widest, no-feature one;
-# ~410 for the no-input one, ~355 once Run is enabled) — with the sidebar open
-# the content never drops below 404, so only the disabled-state captions can
-# wrap, and only in a 864–877 px window (measured).
+# one caption that says why Run is disabled — which a greyed-out button
+# cannot — or what to do before clicking, or mirrors the settings the sidebar
+# may be hiding. A single caption call keeps the row's shape fixed at
+# [button, caption].
+#
+# Run is disabled for one reason only, every feature off, because the toggles
+# commit on change and so that state is always what is on screen. Missing
+# input does *not* disable it: st.text_area commits only on blur or Cmd+Enter,
+# so right after a paste the script still sees an empty box, and a Run
+# disabled on that stale value swallowed the first click — the click only
+# blurred the text area, and the rerun it caused enabled Run for a second
+# click. Enabled, the blur commit and the click land in the same rerun and
+# one click runs the pasted text (verified in headless Chrome). A click with
+# truly no input gets a warning in the status slot instead. The disabled
+# reason is still computed once and drives both the button and the caption,
+# so a condition added to one cannot be missing from the other.
+#
+# Beside the 70 px button the captions need ~418 px of content width (the
+# no-feature one), ~411 (no input) and ~355 (enabled, "Match input"). With the
+# sidebar open the content never drops below 414, so only the no-feature
+# caption wraps under the button, and only in an 864–868 px window (measured
+# under the theme; the no-input wording was chosen to fit).
 n_enabled = sum(enabled.values())
-if not input_text:
-    blocker: str | None = "Paste text, upload a file or pick a sample to enable Run."
-elif not n_enabled:
-    blocker = "Turn on at least one feature in the sidebar to enable Run."
+blocker = (
+    None if n_enabled else "Turn on at least one feature in the sidebar to enable Run."
+)
+if blocker is not None:
+    run_caption = blocker
+elif not input_text:
+    run_caption = "Paste text, upload a file or pick a sample, and click Run."
 else:
-    blocker = None
+    run_caption = (
+        f"{n_enabled} of {len(FEATURES)} features · Output language: {language}"
+    )
 with st.container(horizontal=True, vertical_alignment="center"):
     run = st.button(
         "Run",
@@ -768,10 +786,7 @@ with st.container(horizontal=True, vertical_alignment="center"):
         disabled=blocker is not None,
         key="run",
     )
-    st.caption(
-        blocker
-        or f"{n_enabled} of {len(FEATURES)} features · Output language: {language}"
-    )
+    st.caption(run_caption)
 
 # ---- Results: full width, below the Run row ----
 # Full width rather than a column: the tab strip below needs ~378 CSS px of
@@ -822,7 +837,17 @@ with st.container():
     json_tab = tabs[0]
     feature_tabs = {feature["key"]: tab for feature, tab in zip(FEATURES, tabs[1:])}
 
-    if run:
+    if run and not input_text:
+        # Run stays enabled without input (see the Run row), so a click can
+        # arrive with nothing to analyze. Say so where the run status goes and
+        # touch nothing else: the stored results and the slot order stand.
+        with status_slot:
+            st.warning(
+                "Nothing to analyze yet — paste text, upload a file or pick a "
+                "sample first.",
+                icon=":material/edit:",
+            )
+    elif run:
         with status_slot:
             try:
                 with st.spinner("Loading model…"):

@@ -1022,10 +1022,10 @@ class TestThemeConfig:
         # the derivation silently.
         section = self._theme()[mode]
         # Yellow is in the set for a different reason than the other four: it is
-        # not a sentiment hue, it is what `st.warning` renders in — the app's one
-        # alert, shown for truncated input and unparseable JSON. Its derived
-        # light-mode text measured 2.59:1 over its own tint, which no sentiment
-        # assertion would ever have looked at.
+        # not a sentiment hue, it is what `st.warning` renders in — every warning
+        # the app shows: no input, truncated input, and output that would not
+        # parse or render. Its derived light-mode text measured 2.59:1 over its
+        # own tint, which no sentiment assertion would ever have looked at.
         pinned = sorted(set(_SENTIMENT_COLOR.values()) | {"yellow"})
         missing = [
             f"{name}TextColor" for name in pinned if f"{name}TextColor" not in section
