@@ -753,7 +753,7 @@ text_tab, upload_tab, sample_tab = st.tabs(
 with text_tab:
     pasted = st.text_area(
         "Text",
-        placeholder="Your text here...",
+        placeholder="Your text here…",
         height=200,
         label_visibility="collapsed",
         key="paste",
