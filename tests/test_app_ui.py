@@ -7,7 +7,13 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from streamlit_app import FEATURES, JSON_TAB_LABEL, MAX_INPUT_TOKENS, SAMPLE_TEXTS
+from streamlit_app import (
+    FEATURES,
+    JSON_TAB_LABEL,
+    MAX_INPUT_TOKENS,
+    MODEL_NAME,
+    SAMPLE_TEXTS,
+)
 
 APP = str(Path(__file__).parent.parent / "streamlit_app.py")
 
@@ -548,6 +554,20 @@ class TestRunInteraction:
         ]
         assert any("Nothing to analyze" in w.value for w in panel.children[0].warning)
         assert any("Inputs changed" in i.value for i in panel.children[1].info)
+
+    def test_run_loads_the_configured_model(self, fake_tokenizer: MagicMock) -> None:
+        # The call site passes MODEL_NAME — the id the sidebar caption names
+        # and the model cache is keyed on (TestLoadModel pins the keying).
+        with (
+            patch("mlx_lm.load", return_value=(MagicMock(), fake_tokenizer)) as load,
+            patch("mlx_lm.generate", side_effect=_fake_generate),
+        ):
+            at = AppTest.from_file(APP)
+            at.run()
+            at.text_area(key="paste").set_value("Some text.")
+            at.button(key="run").click().run()
+        assert not at.exception
+        load.assert_called_once_with(MODEL_NAME)
 
     def test_run_populates_results(self, patched_model: MagicMock) -> None:
         at = AppTest.from_file(APP)

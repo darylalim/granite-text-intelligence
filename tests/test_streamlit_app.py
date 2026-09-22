@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +27,7 @@ from streamlit_app import (
     _resolve_max_input_tokens,
     _topic_rows,
     language_directive,
+    load_model,
     parse_json_output,
     render_result,
     resolve_input,
@@ -306,6 +308,30 @@ class TestTruncateToTokens:
         tokenizer.encode.assert_called_once_with(text[:limit], add_special_tokens=False)
         assert truncated is expected_truncated
         assert out == ("truncated text" if expected_truncated else text)
+
+
+class TestLoadModel:
+    """The model cache: process-wide, keyed on the id, one entry at a time."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self) -> Iterator[None]:
+        load_model.clear()
+        yield
+        load_model.clear()
+
+    @patch("streamlit_app.load")
+    def test_cache_is_keyed_on_the_model_id(self, mock_load: MagicMock) -> None:
+        # Streamlit keys a cached function on its source and arguments, never
+        # on the globals it reads, so the id must be an argument: a loader
+        # that read MODEL_NAME kept serving the first model after it changed.
+        mock_load.side_effect = lambda name: (f"model {name}", f"tok {name}")
+
+        assert load_model("a") == ("model a", "tok a")
+        assert load_model("a") == ("model a", "tok a")  # a cache hit
+        assert load_model("b") == ("model b", "tok b")  # a new id loads
+        # max_entries=1: loading "b" evicted "a" rather than holding both.
+        assert load_model("a") == ("model a", "tok a")
+        assert [c.args for c in mock_load.call_args_list] == [("a",), ("b",), ("a",)]
 
 
 @pytest.fixture

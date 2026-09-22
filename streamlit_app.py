@@ -250,13 +250,23 @@ st.set_page_config(
 st.session_state.setdefault("results", None)
 
 
-@st.cache_resource
-def load_model() -> tuple[nn.Module, TokenizerWrapper]:
-    """Load model and tokenizer, cached for the session."""
+@st.cache_resource(max_entries=1)
+def load_model(model_name: str) -> tuple[nn.Module, TokenizerWrapper]:
+    """Load a model and its tokenizer, cached process-wide.
+
+    The cache is shared by every session, tab and rerun of this server — the
+    default scope of st.cache_resource is global — and keyed on `model_name`.
+    The id is an argument rather than a read of MODEL_NAME because Streamlit
+    keys a cached function on its source and its arguments, never on the
+    globals it reads: the zero-argument version kept serving the model it had
+    loaded first after MODEL_NAME changed, while the sidebar caption named the
+    new one. max_entries=1 evicts the previous model when the id changes
+    instead of holding both in memory.
+    """
     # load() returns a 2- or 3-tuple (the 3-tuple only when return_config=True,
     # which we don't pass), so its declared type is a union; narrow to the
     # 2-tuple we actually get.
-    return cast("tuple[nn.Module, TokenizerWrapper]", load(MODEL_NAME))
+    return cast("tuple[nn.Module, TokenizerWrapper]", load(model_name))
 
 
 # The longest token in Granite 4.2's vocabulary, in characters: a run of 128
@@ -921,7 +931,7 @@ with st.container():
         with status_slot:
             try:
                 with st.spinner("Loading model…"):
-                    model, tokenizer = load_model()
+                    model, tokenizer = load_model(MODEL_NAME)
                 text, was_truncated = truncate_to_tokens(input_text, tokenizer)
                 data: dict[str, Any] = {}
                 for feature in FEATURES:
