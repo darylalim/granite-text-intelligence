@@ -472,12 +472,13 @@ def _render_confidence(parsed: dict[str, Any]) -> None:
 # low-contrast yellow) is used for "mixed". Any out-of-enum label falls through
 # to an uncolored value.
 #
-# "negative" stays red even though Streamlit's built-in themes make red the
-# primary too (#FF4B4B — the Run button, the active tab underline, the selected
-# sample chip), so the two share a hue family. Considered and kept: red for
-# negative is near-universal, the alternatives are worse (orange is taken by
-# "mixed", yellow is low-contrast on light), and separating them would mean
-# reintroducing a custom theme the app deliberately does not ship.
+# "negative" is red, which under Streamlit's built-in themes collided with the
+# primary (#FF4B4B — the Run button, the active tab underline, the selected
+# sample chip), leaving the verdict dressed as chrome. That collision is what
+# the IBM Carbon theme in .streamlit/config.toml exists to fix: its primary is
+# Blue 60, 137.7 deg away. The four names below resolve to the theme's
+# <color>TextColor keys, which it pins per mode rather than leaving Streamlit
+# to derive them — see CLAUDE.md, Configuration.
 _SENTIMENT_COLOR = {
     "positive": "green",
     "negative": "red",

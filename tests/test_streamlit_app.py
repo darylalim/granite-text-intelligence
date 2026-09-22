@@ -750,48 +750,95 @@ class TestEffectiveMaxTokens:
 
 
 class TestThemeConfig:
-    """The app ships **no** custom theme; it uses Streamlit's built-in light and
-    dark themes.
+    """The app ships an IBM Carbon theme; `.streamlit/config.toml` defines it.
 
-    Theme faults are invisible at runtime — Streamlit only *warns* on a bad
-    theme, it never raises — so the two that survive the move to the built-ins
-    are pinned here. Neither has any other guard.
+    Theme faults are invisible at runtime — Streamlit only ever *warns* on a
+    theme problem, it never raises — so the four that would ship silently are
+    pinned here. None of them has any other guard.
     """
 
     CONFIG = Path(__file__).parent.parent / ".streamlit" / "config.toml"
+    MODES = ("light", "dark")
 
-    def test_ships_no_custom_theme(self) -> None:
-        # This is deliberately broader than the mechanical hazard, and the gap
-        # is worth naming. The hazard is a *lone* [theme] block — one with no
-        # [theme.light]/[theme.dark] beside it — which locks the app to a
-        # single mode and drops the appearance toggle with no error. A correct
-        # two-mode custom theme would keep the toggle and is still rejected
-        # here: shipping the built-ins is a product decision, not a workaround,
-        # so any [theme] section fails and reinstating one is a call to make
-        # deliberately rather than a diff that slips past a narrower test.
-        # The invariant is the absence of the *section*, not of the file:
-        # config.toml may legitimately come back for non-theme options
-        # (server, logging, client).
-        config: dict = {}
-        if self.CONFIG.is_file():
-            with self.CONFIG.open("rb") as handle:
-                config = tomllib.load(handle)
-        assert "theme" not in config, (
-            f"{self.CONFIG} defines a custom theme. This app ships Streamlit's "
-            "built-in light and dark themes by decision, so any [theme] section "
-            "fails here, two-mode ones included — see CLAUDE.md, Configuration."
+    @classmethod
+    def _theme(cls) -> dict:
+        with cls.CONFIG.open("rb") as handle:
+            return tomllib.load(handle)["theme"]
+
+    @staticmethod
+    def _flatten(section: dict, prefix: str) -> list[tuple[str, object]]:
+        """Flatten a theme table to Streamlit's dotted option keys."""
+        items: list[tuple[str, object]] = []
+        for key, value in section.items():
+            path = f"{prefix}.{key}"
+            if isinstance(value, dict):
+                items.extend(TestThemeConfig._flatten(value, path))
+            else:
+                items.append((path, value))
+        return items
+
+    def test_defines_both_light_and_dark(self) -> None:
+        # The mechanical hazard a custom theme introduces: a lone [theme] block
+        # — one with no [theme.light]/[theme.dark] beside it — locks the app to
+        # a single mode and drops the appearance toggle from the settings menu
+        # with no error and no warning. Both modes present is what keeps the
+        # toggle, so both are asserted rather than the file's mere existence.
+        theme = self._theme()
+        missing = [mode for mode in self.MODES if not isinstance(theme.get(mode), dict)]
+        assert not missing, (
+            f"{self.CONFIG} defines no [theme.{'] / [theme.'.join(missing)}] section. "
+            "A theme without both modes silently drops the light/dark toggle — "
+            "see CLAUDE.md, Configuration."
+        )
+
+    def test_every_key_is_one_streamlit_registers(self) -> None:
+        # A mis-cased or misplaced key disables that style with no error: nothing
+        # validates `backgroundcolor`, and `theme.dark.baseFontSize` is ignored
+        # because baseFontSize is a [theme]-only option. Checking the flattened
+        # dotted path against Streamlit's own registry catches both, and catches
+        # an option removed by an upgrade, which would otherwise read as the
+        # theme quietly reverting to a default.
+        from streamlit.config import get_config_options
+
+        registered = set(get_config_options())
+        unknown = [
+            key
+            for key, _ in self._flatten(self._theme(), "theme")
+            if key not in registered
+        ]
+        assert not unknown, (
+            f"not options Streamlit registers (silently ignored): {unknown}"
+        )
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_sentiment_hues_are_pinned_per_mode(self, mode: str) -> None:
+        # render_result colors the verdict through `:green[...]` and friends,
+        # which resolve to <color>TextColor. Left unset, Streamlit *derives*
+        # that variant from <color>Color — lightening it on dark, darkening it
+        # on light — which is what turned Carbon's Red 50 into a salmon #fc979c
+        # in the theme that shipped until 2026-08-14. Pinning every hue the
+        # enum can produce, in both modes, is the fix; dropping one restores
+        # the derivation silently.
+        section = self._theme()[mode]
+        missing = [
+            f"{name}TextColor"
+            for name in sorted(set(_SENTIMENT_COLOR.values()))
+            if f"{name}TextColor" not in section
+        ]
+        assert not missing, (
+            f"[theme.{mode}] leaves {missing} to Streamlit's derivation — "
+            "see CLAUDE.md, Configuration."
         )
 
     def test_sentiment_colors_are_builtin_names(self) -> None:
         # render_result colors the sentiment metric via `:color[...]` markdown,
         # which resolves only Streamlit's built-in color names. An unrecognized
         # name is not an error — the markdown renders literally, shipping
-        # ":teal[positive]" to the user as visible punctuation. The custom theme
-        # this replaced covered the names by cross-checking its own
-        # `<color>Color` keys; the built-in themes define every recognized name
-        # in both modes, so the name itself is all that is left to get wrong.
-        # Checked against Streamlit's own set, so an upstream rename fails
-        # loudly here rather than silently narrowing what this accepts.
+        # ":teal[positive]" to the user as visible punctuation. The theme tunes
+        # each of these names per mode (above), but the name itself is resolved
+        # by Streamlit, so it is checked against Streamlit's own set: an
+        # upstream rename then fails loudly here rather than silently narrowing
+        # what this accepts.
         from streamlit.elements.lib.color_util import BUILTIN_COLOR_NAMES
 
         unknown = sorted(set(_SENTIMENT_COLOR.values()) - BUILTIN_COLOR_NAMES)

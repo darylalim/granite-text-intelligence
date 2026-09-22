@@ -1,6 +1,118 @@
-# Non-theme options only. No [theme] section may ship: the app relies on
-# Streamlit's built-in light and dark themes, and TestThemeConfig asserts
-# the section's absence — see CLAUDE.md, Configuration.
+# IBM Carbon Gray 100 theme for Granite Text Intelligence.
+#
+# On-brand for the IBM Granite model this app runs: Carbon v11 tokens, IBM Plex
+# Sans/Mono (Google Fonts, no local font files), IBM Blue 60 primary. Both
+# [theme.light] and [theme.dark] are defined, which is what keeps the appearance
+# toggle in the settings menu — a lone [theme] block would lock one mode silently.
+#
+# Four choices are load-bearing; CLAUDE.md (Configuration) carries the full argument
+# and the measured numbers behind each:
+#
+#   * primaryColor is Blue 60, not the built-in themes' red. Red is what the
+#     "negative" sentiment verdict wears, and the stock accent put it 0 deg away
+#     from the Run button, the active tab and every toggle. Blue 60 is 137.7 deg
+#     off, and white on it is 5.00:1 where the stock red was 3.30:1.
+#   * Every sentiment hue is pinned as an explicit <color>TextColor in BOTH modes.
+#     Streamlit derives the text variant by lightening on dark and darkening on
+#     light, which turned this theme's earlier incarnation's Red 50 into a salmon
+#     #fc979c. Pinned, the metric renders the Carbon token itself.
+#   * baseFontSize = 15. IBM Plex Sans at the 16 px root sets the five-tab results
+#     strip at 397 px against a 404 px floor; at 15 it measures 372 px of 414. It
+#     rescales every rem dimension with it (run row 37.5 px, wide padding 75 px).
+#   * The fallback is named BEFORE the colon in `font`/`codeFont`. Streamlit splits
+#     the value on the first colon, so 'IBM Plex Sans', 'Source Sans':<url> declares
+#     the offline stack: with fonts.googleapis.com unreachable the app renders
+#     Streamlit's bundled Source Sans at the 15 px root, same colors and layout.
+#
+# Known trade: primaryColor is also the selected tab-label and selected-chip *text*
+# color, and Blue 60 on #161616 is 3.62:1 — above the 3.0 non-text floor, below AA
+# for 13 px text. No single hex clears both white-on-primary >= 4.5 and
+# primary-as-text >= 4.5 on a Gray 100 page; Carbon itself ships Blue 60 on g100 for
+# interactive elements. Under deuteranopia the three chromatic verdict hues converge,
+# so the word is the value and the color reinforces it — never the sole carrier.
+#
+# Every key here is cross-checked against streamlit.config.get_config_options() by
+# TestThemeConfig: a mis-cased key like `backgroundcolor` disables that style with no
+# error at all. Newest option used is metricValueFontSize/Weight (Streamlit 1.55.0),
+# under the >=1.57 floor — see CLAUDE.md, Dependencies.
+
+[theme]
+primaryColor = "#0f62fe"                   # IBM Blue 60 — Run fill, toggles, tab underline, chip border, progress bars
+font = "'IBM Plex Sans', 'Source Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+codeFont = "'IBM Plex Mono', 'Source Code Pro':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap"
+baseFontSize = 15                          # fits Plex under the results-strip ceiling: 372 px at 864, 397 at root 16
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+metricValueFontSize = "2.4rem"             # holds the verdict at 36 px on the 15 px root
+metricValueFontWeight = 500                # Plex Medium: the heaviest thing below the title, not bold
+baseRadius = "none"                        # Carbon: square buttons, fields, chips, containers, tables
+showWidgetBorder = true
+showSidebarBorder = true                   # the hairline between the sidebar rail and the workspace
+linkUnderline = false
+yellowColor = "#f1c21b"                    # Carbon Yellow 30 (support-warning), both modes
+
+# Carbon Gray 100: background #161616, layer-01 #262626, border-subtle #393939
+[theme.dark]
+backgroundColor = "#161616"
+secondaryBackgroundColor = "#262626"       # fields, selectbox, chips, code
+textColor = "#f4f4f4"                      # text-primary, 16.45:1
+linkColor = "#78a9ff"                      # link-primary (Blue 40); 1.64 would otherwise inherit blueTextColor
+borderColor = "#393939"
+codeBackgroundColor = "#262626"
+codeTextColor = "#f4f4f4"                  # explicit: the default falls back to greenTextColor
+dataframeHeaderBackgroundColor = "#393939" # layer-accent-01 header over background rows
+dataframeBorderColor = "#393939"
+# Sentiment quartet — Carbon dark support tokens, pinned so the metric renders the token
+greenColor = "#42be65"                     # Green 40, support-success
+greenTextColor = "#42be65"                 # 7.57:1
+redColor = "#fa4d56"                       # Red 50, support-error
+redTextColor = "#fa4d56"                   # 5.40:1 — a real red, not a derived salmon
+orangeColor = "#ff832b"                    # Orange 40, support-caution-major
+orangeTextColor = "#ff832b"                # 7.35:1
+grayColor = "#8d8d8d"                      # Gray 50
+grayTextColor = "#a8a8a8"                  # Gray 40, 7.61:1 — reads neutral beside #f4f4f4 body text
+blueColor = "#4589ff"                      # Blue 50, support-info
+blueTextColor = "#78a9ff"
+violetColor = "#a56eff"                    # Purple 40
+
+# The shell sits one Carbon step below the workspace; its field sits at the workspace tone
+[theme.dark.sidebar]
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#161616"
+codeBackgroundColor = "#161616"
+borderColor = "#393939"
+textColor = "#f4f4f4"
+
+# Carbon Gray 10: background #f4f4f4, layer-01 #ffffff, border #c6c6c6
+[theme.light]
+backgroundColor = "#f4f4f4"
+secondaryBackgroundColor = "#ffffff"       # white fields on the gray page, as Carbon g10 fields are
+textColor = "#161616"                      # 16.45:1
+linkColor = "#0f62fe"
+borderColor = "#c6c6c6"                    # border-subtle #e0e0e0 is 1.20:1 on #f4f4f4 and would vanish
+codeBackgroundColor = "#ffffff"
+codeTextColor = "#161616"
+dataframeHeaderBackgroundColor = "#e0e0e0" # layer-accent-01
+dataframeBorderColor = "#c6c6c6"
+# Sentiment quartet — Carbon g10 text tokens
+greenColor = "#24a148"                     # Green 50, support-success
+greenTextColor = "#198038"                 # Green 60, 4.56:1
+redColor = "#da1e28"                       # Red 60, support-error / text-error
+redTextColor = "#da1e28"                   # 4.55:1
+orangeColor = "#ff832b"                    # Orange 40
+orangeTextColor = "#ba4e00"                # Orange 60, 4.57:1
+grayColor = "#8d8d8d"                      # Gray 50
+grayTextColor = "#525252"                  # Gray 70, text-secondary, 7.10:1
+blueColor = "#0f62fe"                      # Blue 60, support-info
+blueTextColor = "#0043ce"                  # Blue 70
+violetColor = "#8a3ffc"                    # Purple 60
+
+# The same rule in the other direction: the rail at the tonal extreme, fields at Gray 10
+[theme.light.sidebar]
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f4"
+codeBackgroundColor = "#f4f4f4"
+borderColor = "#e0e0e0"
+textColor = "#161616"
 
 [server]
 # Disables LocalSourcesWatcher. Its post-run scan of sys.modules probes every
