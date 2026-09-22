@@ -1,6 +1,7 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -595,8 +596,9 @@ class TestRunInteraction:
         ]
         # Timed, since a cold load or first download can take minutes.
         assert loading.kwargs.get("show_time") is True
-        # And alone: the cache's default "Running `load_model(...)`." spinner
-        # would stack under it for the whole load.
+        # And alone: no cached function opens a spinner of its own. The
+        # model's default, "Running `load_model(...)`.", would stack under it
+        # for the whole load.
         assert not [c for c in any_spinner.call_args_list if c.kwargs.get("_cache")]
 
     def test_run_populates_results(self, patched_model: MagicMock) -> None:
@@ -740,6 +742,66 @@ class TestRunInteraction:
         at.run()  # language changed, but Run not clicked again
 
         assert any("Inputs changed" in info.value for info in at.info)
+
+
+def _refuse_to_wait(real_spinner: Any) -> Any:
+    """`st.spinner`, except that the wait for the inference lock raises.
+
+    A Run only waits when the lock is held, and inside AppTest — one script
+    at a time — nothing else can hold it, so a wait means a run leaked it.
+    Waiting would hang the test, so the spinner that opens the wait raises
+    instead, inside the run guard: a leak surfaces as an exception on the
+    page and a run that stored nothing.
+    """
+
+    def spinner(text: str, *args: Any, **kwargs: Any) -> Any:
+        if text.startswith("Waiting for another run"):
+            raise AssertionError("the inference lock was still held")
+        return real_spinner(text, *args, **kwargs)
+
+    return spinner
+
+
+def _stop_mid_run(*_: object, **__: object) -> str:
+    """Stop the run from inside generate, as a superseding rerun does.
+
+    st.stop() requests a stop and enqueues, so StopException — a
+    BaseException the run guard's `except Exception` never sees — is raised
+    at a yield point in the middle of the run, which is how fastReruns ends
+    a run superseded by a click or a settings change.
+    """
+    st.stop()
+
+
+class TestInferenceLock:
+    """The process-wide inference lock is released however a run ends.
+
+    AppTest runs one script at a time, so the contention the lock exists for
+    cannot happen here (it was exercised live, see Performance in CLAUDE.md);
+    what can happen here is a run that leaks it, which would hang every later
+    run in the process.
+    """
+
+    @pytest.mark.parametrize(
+        "first_generate",
+        [
+            pytest.param(_fake_generate, id="finished"),
+            pytest.param(RuntimeError("metal OOM"), id="failed"),
+            pytest.param(_stop_mid_run, id="stopped"),
+        ],
+    )
+    def test_the_next_run_does_not_wait(
+        self, patched_model: MagicMock, first_generate: object
+    ) -> None:
+        with patch("streamlit.spinner", side_effect=_refuse_to_wait(st.spinner)):
+            at = AppTest.from_file(APP)
+            at.run()
+            at.text_area(key="paste").set_value("Some text.")
+            with patch("mlx_lm.generate", side_effect=first_generate):
+                at.button(key="run").click().run()
+            at.button(key="run").click().run()
+        assert not at.exception
+        assert at.session_state["results"] is not None
 
 
 class TestRunFailures:

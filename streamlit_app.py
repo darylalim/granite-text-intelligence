@@ -2,6 +2,7 @@ import json
 import os
 import re
 import string
+import threading
 from pathlib import Path
 from typing import Any, cast
 
@@ -272,6 +273,28 @@ def load_model(model_name: str) -> tuple[nn.Module, TokenizerWrapper]:
     # which we don't pass), so its declared type is a union; narrow to the
     # 2-tuple we actually get.
     return cast("tuple[nn.Module, TokenizerWrapper]", load(model_name))
+
+
+@st.cache_resource(show_spinner=False)
+def _inference_lock() -> threading.Lock:
+    """The one lock every run holds while it generates, process-wide.
+
+    The model is one object shared by every session, and two runs can reach
+    generate() at once: two tabs, or one tab clicked again mid-run — with
+    runner.fastReruns on (the default) the new script thread starts at once,
+    while the old one cannot stop until it leaves generate(), its next yield
+    point being an st.* call. No wrong output was ever seen from an overlap.
+    What does go wrong is mlx-lm's wired_limit, which saves and restores the
+    process-global Metal wired limit around each generation: the first run
+    to finish drops it while the other is still generating, and the last
+    leaves it raised for good. Each overlapping run also allocates its own
+    KV cache (up to ~1.3 GB at the 16K default), and neither finishes sooner.
+    mlx-lm's own server sends every request through one generation thread.
+    A lock in st.session_state would be one per session and serialize
+    nothing; a cached one is shared like the model it guards. No spinner:
+    it returns at once, and the Run is already showing its own.
+    """
+    return threading.Lock()
 
 
 # The longest token in Granite 4.2's vocabulary, in characters: a run of 128
@@ -934,6 +957,8 @@ with st.container():
             )
     elif run:
         with status_slot:
+            lock = _inference_lock()
+            acquired = False
             try:
                 # Timed: a cache miss is a 7.3 GB load, or a download the first
                 # time, and a counting clock is what says it has not hung. A
@@ -941,6 +966,18 @@ with st.container():
                 with st.spinner("Loading model…", show_time=True):
                     model, tokenizer = load_model(MODEL_NAME)
                 text, was_truncated = truncate_to_tokens(input_text, tokenizer)
+                # One run generates at a time (see _inference_lock). The
+                # acquire sits inside this try, with the release in the
+                # finally below rather than in the except: a run superseded
+                # while it waits is stopped by StopException — a
+                # BaseException, raised at the waiting spinner's exit just
+                # after the lock is granted. Waiting before the try leaks the
+                # lock on that path, and every later run in the process then
+                # waits forever (reproduced; see CLAUDE.md, Performance).
+                acquired = lock.acquire(blocking=False)
+                if not acquired:
+                    with st.spinner("Waiting for another run to finish…"):
+                        acquired = lock.acquire()
                 data: dict[str, Any] = {}
                 for feature in FEATURES:
                     if not enabled[feature["key"]]:
@@ -963,6 +1000,9 @@ with st.container():
                 # something", not "this run failed".
                 st.session_state.results = None
                 st.exception(exc)
+            finally:
+                if acquired:
+                    lock.release()
 
     results = cast("dict[str, Any] | None", st.session_state.results)
     if results is not None:
