@@ -1123,6 +1123,19 @@ class TestThemeConfig:
             "tracebacks from the source watcher — see CLAUDE.md, Configuration"
         )
 
+    def test_the_toolbar_hides_developer_actions(self) -> None:
+        # The default "auto" shows developer actions on localhost, and each is
+        # wrong here: Deploy (the hosts it offers cannot install mlx), Auto
+        # rerun (a dead toggle with the file watcher off) and Clear cache, which
+        # evicts the model and the inference lock for every session. "viewer"
+        # removes them, and the C shortcut with them, while R still reruns.
+        client = self._config().get("client", {})
+        assert client.get("toolbarMode") == "viewer", (
+            "client.toolbarMode is not 'viewer', so the menu offers Deploy, a dead "
+            "Auto rerun toggle and a Clear cache that evicts the model — see "
+            "CLAUDE.md, Configuration"
+        )
+
     @pytest.mark.parametrize("mode", MODES)
     def test_sentiment_hues_are_pinned_per_mode(self, mode: str) -> None:
         # render_result colors the verdict through `:green[...]` and friends,

@@ -203,9 +203,19 @@ enableStaticServing = true
 # rerun when a source file changes, and pressing R does NOT apply an edit — R
 # reruns the compiled script Streamlit cached on the first run, which only this
 # watcher or the last open session disconnecting clears. To pick up an edit,
-# reload the app's only open tab or restart `streamlit run`; C (clear cache)
-# leaves the compiled script in place.
+# reload the app's only open tab or restart `streamlit run`. Clearing the
+# cache would not help either: it leaves the compiled script in place.
 fileWatcherType = "none"
+
+[client]
+# "viewer" hides the developer actions that "auto" shows on localhost, each of
+# which is wrong for this app: Deploy (Community Cloud and Snowflake cannot
+# install the darwin-only mlx), Auto rerun (a dead toggle — the file watcher it
+# needs is off above), Rerun (the R key still works) and Clear cache, which
+# evicts the 7.3 GB model and the inference lock for every session and wipes
+# this session's results; the C shortcut goes with it. The menu keeps
+# System / Light / Dark, Print and Record screen.
+toolbarMode = "viewer"
 
 [browser]
 # Streamlit's usage statistics are ON by default. The page fetches
