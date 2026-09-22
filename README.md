@@ -67,7 +67,7 @@ MAX_INPUT_TOKENS=32768 uv run streamlit run streamlit_app.py
 - **Per-feature toggles** — in the sidebar, run exactly the analyses you want; each description lives in the toggle's tooltip
 - **Tabbed results** — full-width per-feature views plus a combined JSON view, with the settings out of the way in a collapsible sidebar
 - **Native Streamlit UI** — an IBM Carbon theme in light and dark, switchable from the settings menu, with self-hosted IBM Plex type and Material Symbol icons throughout
-- **Local and private** — runs entirely on-device via MLX; no text leaves your Mac
+- **Local and private** — runs entirely on-device via MLX; no text leaves your Mac, and with Streamlit's usage statistics turned off the page makes no third-party request
 
 ## Development
 

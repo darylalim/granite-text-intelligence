@@ -953,11 +953,12 @@ class TestPageIcon:
     """The favicon is vendored, and both reasons are silent if broken.
 
     `page_icon=":material/psychology:"` is resolved in Streamlit's *frontend*
-    to a fonts.gstatic.com URL, so the shortcut form makes the app fetch its
-    icon from Google on every cold load — the last third-party request left
-    after the theme's fonts were self-hosted. A path is inlined as a base64
-    `data:` URI instead. Neither failure announces itself: a missing file
-    leaves the tab iconless, and a shortcode just quietly phones home.
+    to a fonts.gstatic.com URL, so the shortcut form makes the page fetch its
+    icon from Google on every cold load — a third-party request from a page
+    that otherwise makes none, since the fonts are self-hosted and usage
+    statistics are off. A path is inlined as a base64 `data:` URI instead.
+    Neither failure announces itself: a missing file leaves the tab iconless,
+    and a shortcode just quietly phones home.
     """
 
     def test_the_icon_file_ships(self) -> None:
@@ -1009,11 +1010,11 @@ class TestPageIcon:
 
 
 class TestThemeConfig:
-    """The app ships an IBM Carbon theme; `.streamlit/config.toml` defines it.
+    """`.streamlit/config.toml`: the IBM Carbon theme and the options beside it.
 
-    Theme faults are invisible at runtime — Streamlit only ever *warns* on a
-    theme problem, it never raises — so the four that would ship silently are
-    pinned here. None of them has any other guard.
+    Config faults are invisible at runtime — Streamlit only ever *warns* on an
+    unknown key or a theme problem, it never raises — so the ones that would
+    ship silently are pinned here. None of them has any other guard.
     """
 
     CONFIG = Path(__file__).parent.parent / ".streamlit" / "config.toml"
@@ -1029,11 +1030,11 @@ class TestThemeConfig:
         return cls._config()["theme"]
 
     @classmethod
-    def _flatten(cls, section: dict, prefix: str) -> list[tuple[str, object]]:
-        """Flatten a theme table to Streamlit's dotted option keys."""
+    def _flatten(cls, section: dict, prefix: str = "") -> list[tuple[str, object]]:
+        """Flatten a config table to Streamlit's dotted option keys."""
         items: list[tuple[str, object]] = []
         for key, value in section.items():
-            path = f"{prefix}.{key}"
+            path = f"{prefix}.{key}" if prefix else key
             if isinstance(value, dict):
                 items.extend(cls._flatten(value, path))
             else:
@@ -1084,17 +1085,42 @@ class TestThemeConfig:
         # because baseFontSize is a [theme]-only option. Checking the flattened
         # dotted path against Streamlit's own registry catches both, and catches
         # an option removed by an upgrade, which would otherwise read as the
-        # theme quietly reverting to a default.
+        # theme quietly reverting to a default. The whole file is flattened, not
+        # just [theme]: a mis-cased `gatherUsagestats` under [browser] is the
+        # same silent warning, and it would leave usage statistics on.
         from streamlit.config import get_config_options
 
         registered = set(get_config_options())
         unknown = [
-            key
-            for key, _ in self._flatten(self._theme(), "theme")
-            if key not in registered
+            key for key, _ in self._flatten(self._config()) if key not in registered
         ]
         assert not unknown, (
             f"not options Streamlit registers (silently ignored): {unknown}"
+        )
+
+    def test_usage_statistics_are_off(self) -> None:
+        # Streamlit's usage statistics default to on: the page fetches
+        # data.streamlit.io/metrics.json and POSTs the page title, persistent
+        # machine ids, every config key set here and every st.* call to the
+        # collector it names. That was the page's one third-party request once
+        # the fonts and favicon were vendored, and nothing on screen shows it —
+        # dropping this key silently turns it back on.
+        browser = self._config().get("browser", {})
+        assert browser.get("gatherUsageStats") is False, (
+            "browser.gatherUsageStats is not false, so the page posts usage "
+            "statistics to Streamlit — see CLAUDE.md, Configuration"
+        )
+
+    def test_the_file_watcher_is_off(self) -> None:
+        # With the watcher on, its post-run scan of sys.modules trips over
+        # transformers 5's lazy placeholder modules: ~109 logged `import torch`
+        # tracebacks and ~0.4 s after every Run. "none" is the only value that
+        # skips the scan; "poll" and "watchdog" only change how its result is
+        # watched.
+        server = self._config().get("server", {})
+        assert server.get("fileWatcherType") == "none", (
+            "server.fileWatcherType is not 'none', so every Run logs ~109 "
+            "tracebacks from the source watcher — see CLAUDE.md, Configuration"
         )
 
     @pytest.mark.parametrize("mode", MODES)

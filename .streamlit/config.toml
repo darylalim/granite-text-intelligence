@@ -35,9 +35,11 @@
 #     served cyrillic, greek and vietnamese on demand, so text in those scripts
 #     now falls back to Source Sans. That covers the 12 output languages (Czech
 #     is the one that needs latin-ext) but not every possible *input*. With the
-#     favicon vendored too (static/icons/, see streamlit_app.py's _PAGE_ICON),
-#     the app now makes NO third-party request at all. Changing a fontFaces
-#     table needs a server restart, not a rerun.
+#     favicon vendored too (static/icons/, see streamlit_app.py's _PAGE_ICON)
+#     and usage statistics off ([browser] below), the PAGE makes no third-party
+#     request. The server's one outbound contact is the Hugging Face Hub, each
+#     time the model loads (HF_HUB_OFFLINE=1 on a warm cache suppresses it).
+#     Changing a fontFaces table needs a server restart, not a rerun.
 #
 # Known trade: primaryColor is also the selected tab-label and selected-chip *text*
 # color, and Blue 60 on #161616 is 3.62:1 — above the 3.0 non-text floor, below AA
@@ -200,3 +202,15 @@ enableStaticServing = true
 # failed import never replaces the placeholder. Cost of "none": no automatic
 # rerun when a source file changes — press R, or restart `streamlit run`.
 fileWatcherType = "none"
+
+[browser]
+# Streamlit's usage statistics are ON by default. The page fetches
+# https://data.streamlit.io/metrics.json and then POSTs events to the collector
+# URL it returns: the page title and URL, locale and timezone, persistent
+# machine ids, the OS and Python and Streamlit versions, every config key this
+# file sets, and every st.* call with its argument types and string lengths.
+# No input text or model output is sent, only lengths — but it is the page's
+# only third-party request once the fonts and favicon are vendored, and in
+# headless Chrome turning it off took the count from 10 requests to 0 over a
+# page load, a Sample pick, a Run and the menu.
+gatherUsageStats = false

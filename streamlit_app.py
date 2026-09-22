@@ -224,15 +224,16 @@ _LOCALIZED_TOKEN_MULTIPLIER = 2
 
 
 # The favicon, vendored rather than named as a Material shortcode. Streamlit
-# resolves `:material/<name>:` in the *frontend*, to a
-# fonts.gstatic.com SVG URL — the one third-party request the app would still
-# make after the theme's fonts were self-hosted. Handed a path instead, it
-# inlines the file as a base64 `data:` URI, so the icon costs no request at all
-# and works offline. The path is resolved from this file rather than the working
-# directory because `streamlit run /abs/path/streamlit_app.py` can be launched
-# from anywhere, and a favicon that fails to resolve is silent: set_page_config
-# swallows the error, the frontend asks for it as a media URL, and the 404 just
-# leaves the tab iconless. TestPageIcon pins both properties.
+# resolves `:material/<name>:` in the *frontend*, to a fonts.gstatic.com SVG
+# URL — a third-party request on every cold load, from a page that otherwise
+# makes none (the fonts are self-hosted and usage statistics are off, see
+# .streamlit/config.toml). Handed a path instead, it inlines the file as a
+# base64 `data:` URI, so the icon costs no request at all and works offline.
+# The path is resolved from this file rather than the working directory because
+# `streamlit run /abs/path/streamlit_app.py` can be launched from anywhere, and
+# a favicon that fails to resolve is silent: set_page_config swallows the
+# error, the frontend asks for it as a media URL, and the 404 just leaves the
+# tab iconless. TestPageIcon pins both properties.
 _PAGE_ICON = Path(__file__).parent / "static" / "icons" / "psychology.svg"
 
 st.set_page_config(
