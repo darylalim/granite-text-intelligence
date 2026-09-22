@@ -113,13 +113,27 @@ class TestInitialRender:
         assert all(toggle.value for toggle in at.toggle)
         assert at.toggle(key="feature_summary").label == "Summarization"
 
-    def test_pre_run_prompt_shown(self) -> None:
+    def test_every_result_tab_carries_the_full_pre_run_prompt(self) -> None:
+        # Per tab, not any() over the page: the tab the reader lands on must
+        # carry the whole instruction, and an any() stayed green while only
+        # the JSON tab did and every feature tab said just "Run to see
+        # results here."
         at = AppTest.from_file(APP).run()
         assert at.session_state["results"] is None
-        assert any(
-            "in the sidebar" in info.value and "click Run" in info.value
-            for info in at.info
-        )
+        for tab in _result_tabs(at):
+            [prompt] = [info.value for info in tab.info]
+            assert "in the sidebar" in prompt
+            assert "click Run" in prompt
+
+    def test_results_open_on_the_first_feature_tab(self) -> None:
+        # st.tabs selects the first tab, so the order decides what a Run
+        # lands on: a rendered view, with the raw JSON last.
+        at = AppTest.from_file(APP).run()
+        labels = [tab.label for tab in _result_tabs(at)]
+        assert labels == [
+            *[f"{f['icon']} {f['tab_label']}" for f in FEATURES],
+            JSON_TAB_LABEL,
+        ]
 
     def test_language_selectbox_defaults_to_match_input(self) -> None:
         at = AppTest.from_file(APP).run()
@@ -185,6 +199,11 @@ def _results_panel(at: AppTest):
     raise AssertionError("results panel not found")
 
 
+def _result_tabs(at: AppTest) -> list:
+    """The results panel's tabs, in order — its last child is the tab block."""
+    return list(_results_panel(at).children[2].children.values())
+
+
 def _run_row(at: AppTest):
     """The horizontal container holding Run — located by the button, not by
     being the first `flex_container` in main, which a plain `st.container()`
@@ -198,7 +217,7 @@ def _run_row(at: AppTest):
 
 
 class TestResultsPanelStructure:
-    """The results panel's emission order, which nothing else pins.
+    """The order the results panel emits its slots and tabs in.
 
     Both properties degrade silently if someone moves the run block back above
     the tabs: the tab block returns to a shifting delta path (remounting and
@@ -704,6 +723,26 @@ class TestRunInteraction:
         assert frame["confidence"].isna().tolist() == [False, True]
         # Only the two configured columns are shown, whatever else a row holds.
         assert list(at.dataframe[0].proto.column_order) == ["label", "confidence"]
+
+    def test_each_result_lands_in_its_labelled_tab(
+        self, patched_model: MagicMock
+    ) -> None:
+        # The labels and the tab handles are paired by position, so a label
+        # order and an index that disagree (JSON labelled last but filled
+        # through tabs[0]) put every result under the wrong heading — which
+        # the pre-run tests cannot see, since every tab then says the same.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Great earbuds, battery lasts all day.")
+        at.button(key="run").click().run()
+        assert not at.exception
+        tabs = {tab.label: tab for tab in _result_tabs(at)}
+        by_key = {f["key"]: tabs[f"{f['icon']} {f['tab_label']}"] for f in FEATURES}
+        assert len(tabs[JSON_TAB_LABEL].json) == 1
+        assert len(by_key["topics"].dataframe) == 1
+        assert [m.label for m in by_key["sentiment"].metric] == ["Sentiment"]
+        assert [s.value for s in by_key["intents"].caption][:1] == ["Intent"]
+        assert len(by_key["summary"].text) == 1
 
     def test_sample_selection_feeds_the_run(self, patched_model: MagicMock) -> None:
         # Selecting a built-in sample resolves as the input (precedence falls

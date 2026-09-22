@@ -170,6 +170,10 @@ LABELS: dict[str, str] = {feature["key"]: feature["label"] for feature in FEATUR
 # results panel by it and pins its icon.
 JSON_TAB_LABEL = ":material/data_object: JSON"
 
+# What every result tab says before the first run. One sentence for all five,
+# since the tab a reader lands on must carry the whole instruction.
+_PRE_RUN_PROMPT = "Choose features in the sidebar and click Run to see results here."
+
 SAMPLE_TEXTS: dict[str, str] = {
     "Product review": (
         "I bought these wireless earbuds last month and I'm honestly impressed. The "
@@ -959,14 +963,22 @@ with st.container():
     # tell the user to click.
     status_slot = st.container()
     notice_slot = st.empty()
+    # The feature tabs first and JSON last: st.tabs selects the first tab, and
+    # the rendered views are what a Run is for, while JSON is the raw second
+    # view. The order is static rather than a default= computed from the
+    # toggles, which would change the tab block on every toggle and reset the
+    # selected tab — the remount the reserved slots above exist to prevent.
+    # So a Run with Summarization off lands on its "not enabled" note, one
+    # click from the rest. Before the first run every tab carries the same
+    # full prompt, so whichever one the reader lands on says what to do.
     tabs = st.tabs(
         [
-            JSON_TAB_LABEL,
             *[f"{feature['icon']} {feature['tab_label']}" for feature in FEATURES],
+            JSON_TAB_LABEL,
         ]
     )
-    json_tab = tabs[0]
-    feature_tabs = {feature["key"]: tab for feature, tab in zip(FEATURES, tabs[1:])}
+    feature_tabs = {feature["key"]: tab for feature, tab in zip(FEATURES, tabs[:-1])}
+    json_tab = tabs[-1]
 
     # A run that was still going when a widget changed never finished:
     # with runner.fastReruns on (the default) the change stops it at its next
@@ -1068,6 +1080,19 @@ with st.container():
                         icon=":material/sync:",
                     )
 
+    for key, tab in feature_tabs.items():
+        with tab:
+            if results is not None and key in results["data"]:
+                try:
+                    render_result(key, results["data"][key])
+                except Exception as exc:  # noqa: BLE001 (untrusted model output shape)
+                    st.warning("Could not render this result.")
+                    st.exception(exc)
+            elif results is None:
+                st.info(_PRE_RUN_PROMPT, icon=":material/play_circle:")
+            else:
+                st.caption(f"{LABELS[key]} was not enabled for this run.")
+
     with json_tab:
         if results is not None and results["data"]:
             result_data = results["data"]
@@ -1080,20 +1105,4 @@ with st.container():
                 }
             )
         else:
-            st.info(
-                "Choose features in the sidebar and click Run to see results here.",
-                icon=":material/play_circle:",
-            )
-
-    for key, tab in feature_tabs.items():
-        with tab:
-            if results is not None and key in results["data"]:
-                try:
-                    render_result(key, results["data"][key])
-                except Exception as exc:  # noqa: BLE001 (untrusted model output shape)
-                    st.warning("Could not render this result.")
-                    st.exception(exc)
-            elif results is None:
-                st.info("Run to see results here.", icon=":material/play_circle:")
-            else:
-                st.caption(f"{LABELS[key]} was not enabled for this run.")
+            st.info(_PRE_RUN_PROMPT, icon=":material/play_circle:")

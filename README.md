@@ -36,7 +36,7 @@ The model (~7.3 GB, bf16) downloads automatically the first time you click **Run
 2. In the sidebar, toggle the analyses you want: **Summarization**, **Topic detection**, **Intent recognition**, **Sentiment**.
 3. (Optional) Also in the sidebar, pick an **Output language** — "Match input" (default) mirrors the input's language, or choose one of Granite's 12 supported languages: English, German, Spanish, French, Japanese, Portuguese, Arabic, Czech, Italian, Korean, Dutch, Chinese.
 4. Click **Run**, beneath the input. The caption beside it says which input and how many analyses a click will run, that there is no text yet, or — when every analysis is switched off — why the button is disabled.
-5. Read the results in the tabs below, one per feature plus a combined **JSON** tab.
+5. Read the results in the tabs below: one per feature, opening on **Summary**, with the combined **JSON** tab last.
 
 The toggles, the output language and the chosen sample are kept in the page's address (for example `?language=German&feature_summary=false`), so a reload or a bookmark brings them back. Pasted text and uploaded files are not kept there.
 
