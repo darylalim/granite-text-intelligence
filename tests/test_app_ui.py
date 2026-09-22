@@ -338,12 +338,40 @@ class TestRunRow:
         at.run()
         assert at.button(key="run").disabled is False
         n = len(FEATURES)
-        expected = f"{n - 1} of {n} features · Output language: German"
+        expected = f"Pasted text · {n - 1} of {n} features · Output: German"
         assert [c.value for c in _run_row(at).caption] == [expected]
         # A second data point, so a hardcoded count cannot pass.
         at.toggle(key="feature_topics").set_value(False)
         at.run()
-        expected = f"{n - 2} of {n} features · Output language: German"
+        expected = f"Pasted text · {n - 2} of {n} features · Output: German"
+        assert [c.value for c in _run_row(at).caption] == [expected]
+
+    @pytest.mark.parametrize(
+        "sources, named",
+        [
+            pytest.param(("sample",), "Sample", id="sample"),
+            pytest.param(("sample", "upload"), "Uploaded file", id="upload"),
+            pytest.param(("sample", "upload", "paste"), "Pasted text", id="paste"),
+        ],
+    )
+    def test_enabled_caption_names_the_source_run_will_analyze(
+        self, sources: tuple[str, ...], named: str
+    ) -> None:
+        # The precedence is otherwise invisible — a sample on screen while
+        # pasted text wins looks exactly like the input. Each case adds the
+        # next-higher source, so the caption must follow the winner, not the
+        # first source that was set.
+        at = AppTest.from_file(APP)
+        at.run()
+        if "sample" in sources:
+            at.segmented_control(key="sample_select").set_value("Product review")
+        if "upload" in sources:
+            at.file_uploader(key="upload").set_value(UPLOAD)
+        if "paste" in sources:
+            at.text_area(key="paste").set_value("Some text.")
+        at.run()
+        n = len(FEATURES)
+        expected = f"{named} · {n} of {n} features · Output: Match input"
         assert [c.value for c in _run_row(at).caption] == [expected]
 
     @staticmethod
@@ -378,6 +406,105 @@ class TestRunRow:
         at.toggle(key="feature_sentiment").set_value(True)
         at.run()
         self._assert_row_shape(at)  # enabled
+
+
+UPLOAD_TAB = ":material/upload_file: Upload"
+SAMPLE_TAB = ":material/dataset: Sample"
+
+
+def _tab_captions(at: AppTest, label: str) -> list[str]:
+    [tab] = [t for t in at.tabs if t.label == label]
+    return [c.value for c in tab.caption]
+
+
+def _tab_kinds(at: AppTest, label: str) -> list[str]:
+    [tab] = [t for t in at.tabs if t.label == label]
+    return [child.type for child in tab.children.values()]
+
+
+class TestOutrankedSources:
+    """A tab whose content Run will *not* analyze says so — no model needed.
+
+    Text > Upload > Sample is resolved silently, so a previewed sample or file
+    that a higher source outranks looks exactly like the input. The note names
+    the winner and how to clear it; the Run caption (`TestRunRow`) names the
+    winner too, and both read it from `resolve_input` rather than re-deriving
+    the precedence.
+    """
+
+    def test_paste_outranks_upload_and_sample(self) -> None:
+        at = AppTest.from_file(APP)
+        at.run()
+        at.segmented_control(key="sample_select").set_value("Product review")
+        at.file_uploader(key="upload").set_value(UPLOAD)
+        at.text_area(key="paste").set_value("Some text.")
+        at.run()
+        assert _tab_captions(at, UPLOAD_TAB) == [
+            (
+                "Run analyzes the pasted text, not this file — "
+                "clear the Text tab to use it."
+            )
+        ]
+        assert _tab_captions(at, SAMPLE_TAB) == [
+            (
+                "Run analyzes the pasted text, not this sample — "
+                "clear the Text tab to use it."
+            )
+        ]
+        # The outranked previews still render, and the note sits between the
+        # picker and the preview it qualifies — the reason the previews are
+        # emitted in a second pass, after resolve_input.
+        assert _tab_kinds(at, UPLOAD_TAB) == [
+            "file_uploader",
+            "caption",
+            "flex_container",
+        ]
+        assert _tab_kinds(at, SAMPLE_TAB) == [
+            "button_group",
+            "caption",
+            "flex_container",
+        ]
+        assert any(text.value == UPLOAD_TEXT for text in at.text)
+
+    def test_upload_outranks_sample(self) -> None:
+        at = AppTest.from_file(APP)
+        at.run()
+        at.segmented_control(key="sample_select").set_value("Product review")
+        at.file_uploader(key="upload").set_value(UPLOAD)
+        at.run()
+        assert _tab_captions(at, UPLOAD_TAB) == []  # the winner carries no note
+        assert _tab_captions(at, SAMPLE_TAB) == [
+            (
+                "Run analyzes the uploaded file, not this sample — "
+                "remove the file in the Upload tab to use it."
+            )
+        ]
+
+    def test_no_note_once_the_higher_source_is_cleared(self) -> None:
+        at = AppTest.from_file(APP)
+        at.run()
+        at.segmented_control(key="sample_select").set_value("Product review")
+        at.text_area(key="paste").set_value("Some text.")
+        at.run()
+        assert len(_tab_captions(at, SAMPLE_TAB)) == 1
+        at.text_area(key="paste").set_value("   ")  # blank falls through
+        at.run()
+        assert _tab_captions(at, SAMPLE_TAB) == []
+        assert not at.exception
+
+    def test_blank_upload_is_not_outranked(self) -> None:
+        # A whitespace-only file loses to the sample *below* it, since
+        # resolve_input skips blank candidates. That is not being outranked,
+        # so no note — and the note's clear-this lookup, which has no entry
+        # for the sample, is never reached.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.segmented_control(key="sample_select").set_value("Product review")
+        at.file_uploader(key="upload").set_value(("blank.txt", b" \n ", "text/plain"))
+        at.run()
+        assert not at.exception
+        assert _tab_captions(at, UPLOAD_TAB) == []
+        assert next(c.value for c in _run_row(at).caption).startswith("Sample · ")
 
 
 class TestRunInteraction:
@@ -463,12 +590,12 @@ class TestRunInteraction:
 
     def test_sample_selection_feeds_the_run(self, patched_model: MagicMock) -> None:
         # Selecting a built-in sample resolves as the input (precedence falls
-        # through to it), enabling Run and producing results.
+        # through to it), the Run caption says so, and a click produces results.
         at = AppTest.from_file(APP)
         at.run()
         at.segmented_control(key="sample_select").set_value("Product review")
         at.run()
-        assert at.button(key="run").disabled is False
+        assert next(c.value for c in _run_row(at).caption).startswith("Sample · ")
         at.button(key="run").click().run()
         assert not at.exception
         # The picked sample is what actually fed the run — signature[0] is the
@@ -479,14 +606,15 @@ class TestRunInteraction:
         )
 
     def test_upload_feeds_the_run(self, patched_model: MagicMock) -> None:
-        # The only test that exercises the Upload source: the decode, the
-        # preview, and the uploaded text reaching the run.
+        # The Upload source end to end: the decode, the preview, the Run
+        # caption naming it, and the uploaded text reaching the run.
         at = AppTest.from_file(APP)
         at.run()
         at.file_uploader(key="upload").set_value(UPLOAD)
         at.run()
         assert not at.exception
-        assert at.button(key="run").disabled is False
+        caption = next(c.value for c in _run_row(at).caption)
+        assert caption.startswith("Uploaded file · ")
         assert any(text.value == UPLOAD_TEXT for text in at.text)  # the preview
         at.button(key="run").click().run()
         assert not at.exception

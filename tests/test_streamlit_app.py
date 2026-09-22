@@ -181,25 +181,46 @@ class TestResolveInput:
     @pytest.mark.parametrize(
         "pasted, uploaded, sample, expected",
         [
-            pytest.param("typed", "uploaded", "sample", "typed", id="pasted-wins"),
             pytest.param(
-                "", "uploaded", "sample", "uploaded", id="upload-when-no-pasted"
+                "typed",
+                "uploaded",
+                "sample",
+                ("typed", "pasted text"),
+                id="pasted-wins",
             ),
-            pytest.param("", "", "sample", "sample", id="sample-when-neither"),
-            pytest.param("", "", "", "", id="all-empty"),
-            pytest.param("  spaced  ", "", "", "spaced", id="strips-whitespace"),
+            pytest.param(
+                "",
+                "uploaded",
+                "sample",
+                ("uploaded", "uploaded file"),
+                id="upload-when-no-pasted",
+            ),
+            pytest.param(
+                "", "", "sample", ("sample", "sample"), id="sample-when-neither"
+            ),
+            pytest.param("", "", "", ("", ""), id="all-empty"),
+            pytest.param(
+                "  spaced  ", "", "", ("spaced", "pasted text"), id="strips-whitespace"
+            ),
             pytest.param(
                 "   ",
                 "uploaded",
                 "sample",
-                "uploaded",
+                ("uploaded", "uploaded file"),
                 id="whitespace-only-falls-through",
+            ),
+            pytest.param(
+                "", " \n ", "", ("", ""), id="whitespace-only-names-no-source"
             ),
         ],
     )
     def test_resolve_input(
-        self, pasted: str, uploaded: str, sample: str, expected: str
+        self, pasted: str, uploaded: str, sample: str, expected: tuple[str, str]
     ) -> None:
+        # The source is part of the contract: the Run caption and the
+        # outranked-tab notes compare against it instead of re-deriving the
+        # precedence, so a source that disagreed with the text would mislabel
+        # what Run analyzes.
         assert resolve_input(pasted, uploaded, sample) == expected
 
 

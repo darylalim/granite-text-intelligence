@@ -292,13 +292,26 @@ def parse_json_output(raw: str) -> dict[str, Any] | None:
     return None
 
 
-def resolve_input(pasted: str, uploaded: str, sample: str) -> str:
+def resolve_input(pasted: str, uploaded: str, sample: str) -> tuple[str, str]:
     """Resolve the active input by precedence: pasted > uploaded > sample.
+
+    Returns ``(text, source)``: the winning candidate and its name — "pasted
+    text", "uploaded file" or "sample" — or ``("", "")`` when every candidate
+    is empty. The precedence is encoded here and nowhere else; the UI states
+    it (the Run caption names the source, and a tab whose content is outranked
+    says by what) by comparing against this name rather than re-deriving it.
 
     Each candidate is stripped first, so a whitespace-only entry falls through
     to the next source instead of suppressing it.
     """
-    return pasted.strip() or uploaded.strip() or sample.strip()
+    for text, source in (
+        (pasted, "pasted text"),
+        (uploaded, "uploaded file"),
+        (sample, "sample"),
+    ):
+        if text.strip():
+            return text.strip(), source
+    return "", ""
 
 
 def language_directive(feature: dict[str, Any], language: str) -> str:
@@ -671,6 +684,29 @@ def _preview(text: str) -> None:
         st.text(text, width="stretch")
 
 
+# How to stop a source from outranking the ones below it. Only the two that
+# can outrank anything are here; "sample" is last in resolve_input's order.
+_CLEAR_SOURCE = {
+    "pasted text": "clear the Text tab",
+    "uploaded file": "remove the file in the Upload tab",
+}
+
+
+def _outranked_note(content: str, own_source: str, noun: str, source: str) -> None:
+    """Say so when a tab's content is not what Run will analyze.
+
+    `source` is resolve_input's winner. A tab with content of its own that did
+    not win was outranked by a higher source — resolve_input skips only blank
+    candidates — so the note names that source and how to clear it without
+    restating the precedence here. `noun` is what the tab calls its content.
+    """
+    if content.strip() and source != own_source:
+        st.caption(
+            f"Run analyzes the {source}, not this {noun} — "
+            f"{_CLEAR_SOURCE[source]} to use it."
+        )
+
+
 # ---- Sidebar: run settings, nothing the reader acts on ----
 # The sidebar holds what changes *how* a run behaves — which features, which
 # output language — plus one line of app metadata, and nothing the user reads
@@ -729,25 +765,36 @@ with upload_tab:
     uploaded_text = (
         uploaded.getvalue().decode("utf-8", errors="replace") if uploaded else ""
     )
-    if uploaded_text:
-        _preview(uploaded_text)
 with sample_tab:
     choice = st.segmented_control(
         "Pick a sample", list(SAMPLE_TEXTS), key="sample_select"
     )
     sample_text = SAMPLE_TEXTS.get(choice, "")
-    if sample_text:
-        _preview(sample_text)
 
-input_text = resolve_input(pasted, uploaded_text, sample_text)
+input_text, input_source = resolve_input(pasted, uploaded_text, sample_text)
+
+# The precedence is otherwise invisible: a sample or file previewed on screen
+# while pasted text wins looks exactly like the input, and a Sentiment result
+# for the wrong text looks like a right one. So each outranked tab says what
+# Run analyzes instead, under its picker and above its preview — which is why
+# the previews are emitted here, after the input is resolved, and not in the
+# first pass through the tabs.
+with upload_tab:
+    if uploaded_text:
+        _outranked_note(uploaded_text, "uploaded file", "file", input_source)
+        _preview(uploaded_text)
+with sample_tab:
+    if sample_text:
+        _outranked_note(sample_text, "sample", "sample", input_source)
+        _preview(sample_text)
 
 # ---- Run: stays with the input it acts on ----
 # A horizontal row directly under the input: the primary button at its own
 # width (stretched across a full-width main area it would be an eyesore) and
 # one caption that says why Run is disabled — which a greyed-out button
-# cannot — or what to do before clicking, or mirrors the settings the sidebar
-# may be hiding. A single caption call keeps the row's shape fixed at
-# [button, caption].
+# cannot — or what to do before clicking, or names the input source a click
+# will analyze and mirrors the settings the sidebar may be hiding. A single
+# caption call keeps the row's shape fixed at [button, caption].
 #
 # Run is disabled for one reason only, every feature off, because the toggles
 # commit on change and so that state is always what is on screen. Missing
@@ -762,10 +809,12 @@ input_text = resolve_input(pasted, uploaded_text, sample_text)
 # so a condition added to one cannot be missing from the other.
 #
 # Beside the 70 px button the captions need ~418 px of content width (the
-# no-feature one), ~411 (no input) and ~355 (enabled, "Match input"). With the
-# sidebar open the content never drops below 414, so only the no-feature
-# caption wraps under the button, and only in an 864–868 px window (measured
-# under the theme; the no-input wording was chosen to fit).
+# no-feature one), ~411 (no input) and at most ~388 once enabled ("Uploaded
+# file" with "Match input"). With the sidebar open the content never drops
+# below 414, so only the no-feature caption wraps under the button, and only
+# in an 864–868 px window (measured under the theme). The other two were
+# worded to fit: the enabled one says "Output:" rather than the sidebar's
+# "Output language:", which with the source named needed up to 444.
 n_enabled = sum(enabled.values())
 blocker = (
     None if n_enabled else "Turn on at least one feature in the sidebar to enable Run."
@@ -776,7 +825,8 @@ elif not input_text:
     run_caption = "Paste text, upload a file or pick a sample, and click Run."
 else:
     run_caption = (
-        f"{n_enabled} of {len(FEATURES)} features · Output language: {language}"
+        f"{input_source.capitalize()} · "
+        f"{n_enabled} of {len(FEATURES)} features · Output: {language}"
     )
 with st.container(horizontal=True, vertical_alignment="center"):
     run = st.button(

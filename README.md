@@ -30,10 +30,10 @@ The model (~7.3 GB, bf16) downloads automatically the first time you click **Run
 
 ## Usage
 
-1. Provide text via one of the **Text**, **Upload**, or **Sample** tabs (when more than one has content, precedence is Text > Upload > Sample).
+1. Provide text via one of the **Text**, **Upload**, or **Sample** tabs. When more than one has content, precedence is Text > Upload > Sample, and an Upload or Sample tab that is being outranked says so.
 2. In the sidebar, toggle the analyses you want: **Summarization**, **Topic detection**, **Intent recognition**, **Sentiment**.
 3. (Optional) Also in the sidebar, pick an **Output language** — "Match input" (default) mirrors the input's language, or choose one of Granite's 12 supported languages: English, German, Spanish, French, Japanese, Portuguese, Arabic, Czech, Italian, Korean, Dutch, Chinese.
-4. Click **Run**, beneath the input. The caption beside it says what a click will run, that there is no text yet, or — when every analysis is switched off — why the button is disabled.
+4. Click **Run**, beneath the input. The caption beside it says which input and how many analyses a click will run, that there is no text yet, or — when every analysis is switched off — why the button is disabled.
 5. Read the results in the tabs below, one per feature plus a combined **JSON** tab.
 
 ## Configuration
