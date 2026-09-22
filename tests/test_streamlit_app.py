@@ -761,9 +761,13 @@ class TestThemeConfig:
     MODES = ("light", "dark")
 
     @classmethod
-    def _theme(cls) -> dict:
+    def _config(cls) -> dict:
         with cls.CONFIG.open("rb") as handle:
-            return tomllib.load(handle)["theme"]
+            return tomllib.load(handle)
+
+    @classmethod
+    def _theme(cls) -> dict:
+        return cls._config()["theme"]
 
     @staticmethod
     def _flatten(section: dict, prefix: str) -> list[tuple[str, object]]:
@@ -828,6 +832,49 @@ class TestThemeConfig:
         assert not missing, (
             f"[theme.{mode}] leaves {missing} to Streamlit's derivation — "
             "see CLAUDE.md, Configuration."
+        )
+
+    def test_self_hosted_fonts_are_actually_served(self) -> None:
+        # The IBM Plex faces are vendored under static/ rather than fetched from
+        # Google Fonts, which introduces a failure mode the theme did not have
+        # while it named a URL: a renamed, moved or missing .woff2 does not
+        # raise — the browser silently falls through the family stack to
+        # Streamlit's bundled Source Sans, and the only symptom is that the app
+        # stops looking like IBM. `server.enableStaticServing` is load-bearing
+        # for the same reason: without it every `app/static/...` URL 404s and
+        # every face falls back, which is a one-line config edit away.
+        config = self._config()
+        faces = config["theme"]["fontFaces"]
+        assert faces, "no [[theme.fontFaces]] tables: the Plex faces would not load"
+        assert config["server"]["enableStaticServing"] is True, (
+            "server.enableStaticServing is off, so every app/static/ font URL 404s "
+            "and the theme silently falls back to the bundled font"
+        )
+        root = self.CONFIG.parent.parent
+        missing = []
+        for face in faces:
+            url = face["url"]
+            if not url.startswith("app/static/"):
+                missing.append(f"{url} (not served from static/)")
+            elif not (root / "static" / url.removeprefix("app/static/")).is_file():
+                missing.append(url)
+        assert not missing, (
+            f"[[theme.fontFaces]] URLs with no file behind them: {missing}"
+        )
+
+    def test_every_font_face_declares_a_unicode_range(self) -> None:
+        # Two files share each family+weight — the latin subset and latin-ext.
+        # Without an explicit unicodeRange the browser stops at the first
+        # matching face and never fetches latin-ext, which puts Czech output
+        # (one of the 12 supported languages: ě š č ř ž ů are all above U+00FF)
+        # in the fallback face while the rest of the page stays Plex.
+        undeclared = [
+            f"{face['family']} {face.get('weight')}"
+            for face in self._theme()["fontFaces"]
+            if not face.get("unicodeRange")
+        ]
+        assert not undeclared, (
+            f"faces with no unicodeRange, so a later subset never loads: {undeclared}"
         )
 
     def test_sentiment_colors_are_builtin_names(self) -> None:

@@ -19,10 +19,19 @@
 #   * baseFontSize = 15. IBM Plex Sans at the 16 px root sets the five-tab results
 #     strip at 397 px against a 404 px floor; at 15 it measures 372 px of 414. It
 #     rescales every rem dimension with it (run row 37.5 px, wide padding 75 px).
-#   * The fallback is named BEFORE the colon in `font`/`codeFont`. Streamlit splits
-#     the value on the first colon, so 'IBM Plex Sans', 'Source Sans':<url> declares
-#     the offline stack: with fonts.googleapis.com unreachable the app renders
-#     Streamlit's bundled Source Sans at the 15 px root, same colors and layout.
+#   * The fonts are SELF-HOSTED, not fetched from Google Fonts. The ten woff2 files
+#     in static/fonts/ are the same latin and latin-ext subsets fonts.googleapis.com
+#     serves (231 KB; IBM Plex is SIL OFL 1.1 and static/fonts/LICENSE.txt travels
+#     with them), wired up by the [[theme.fontFaces]] tables below and served by
+#     server.enableStaticServing. So the app is identical offline — no font request
+#     leaves the machine, no FOUT, and the 372 px strip measurement cannot depend
+#     on the network. (One third-party request does survive and is not a font:
+#     page_icon=":material/psychology:" makes Streamlit fetch that symbol's SVG
+#     favicon from fonts.gstatic.com. The Material Symbols *font* is bundled.) Each face declares its unicodeRange: without it the browser
+#     stops at the first matching face and latin-ext never loads, which would put
+#     Czech output (e s c r z u with carons) in the fallback face. Source Sans /
+#     Source Code Pro remain named in the stacks as the fallback if a file is
+#     missing. Changing a fontFaces table needs a server restart, not a rerun.
 #
 # Known trade: primaryColor is also the selected tab-label and selected-chip *text*
 # color, and Blue 60 on #161616 is 3.62:1 — above the 3.0 non-text floor, below AA
@@ -38,8 +47,8 @@
 
 [theme]
 primaryColor = "#0f62fe"                   # IBM Blue 60 — Run fill, toggles, tab underline, chip border, progress bars
-font = "'IBM Plex Sans', 'Source Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
-codeFont = "'IBM Plex Mono', 'Source Code Pro':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap"
+font = "IBM Plex Sans, Source Sans, sans-serif"
+codeFont = "IBM Plex Mono, Source Code Pro, monospace"
 baseFontSize = 15                          # fits Plex under the results-strip ceiling: 372 px at 864, 397 at root 16
 headingFontWeights = [600, 600, 600, 600, 600, 600]
 metricValueFontSize = "2.4rem"             # holds the verdict at 36 px on the 15 px root
@@ -49,6 +58,78 @@ showWidgetBorder = true
 showSidebarBorder = true                   # the hairline between the sidebar rail and the workspace
 linkUnderline = false
 yellowColor = "#f1c21b"                    # Carbon Yellow 30 (support-warning), both modes
+
+# Self-hosted IBM Plex — see the header; the unicodeRange on each face is what
+# makes the browser fetch the latin-ext file as well as the latin one.
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/IBMPlexMono-400-latin.woff2"
+weight = 400
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/IBMPlexMono-400-latin-ext.woff2"
+weight = 400
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/IBMPlexMono-600-latin.woff2"
+weight = 600
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/IBMPlexMono-600-latin-ext.woff2"
+weight = 600
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-400-latin.woff2"
+weight = 400
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-400-latin-ext.woff2"
+weight = 400
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-500-latin.woff2"
+weight = 500
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-500-latin-ext.woff2"
+weight = 500
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-600-latin.woff2"
+weight = 600
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-600-latin-ext.woff2"
+weight = 600
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
 
 # Carbon Gray 100: background #161616, layer-01 #262626, border-subtle #393939
 [theme.dark]
@@ -115,6 +196,10 @@ borderColor = "#e0e0e0"
 textColor = "#161616"
 
 [server]
+# Serves static/ at /app/static/, which is how the [[theme.fontFaces]] URLs above
+# resolve. Off by default.
+enableStaticServing = true
+
 # Disables LocalSourcesWatcher. Its post-run scan of sys.modules probes every
 # module with hasattr(m, "__path__"), and transformers 5's lazy placeholder
 # modules import their real file on any attribute access — for the vision
