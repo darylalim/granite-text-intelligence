@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -28,6 +29,12 @@ TOPICS_PAYLOAD = (
     '{"topics": [{"label": "earbuds", "confidence": 0.9}, {"label": "battery"}]}'
 )
 SENTIMENT_PAYLOAD = '{"sentiment": "positive", "confidence": 0.9}'
+
+# 0xe9 is latin-1 "é" and not valid UTF-8 on its own: the upload decode must
+# replace it with U+FFFD rather than raise, since a strict decode puts a
+# UnicodeDecodeError traceback where the Run row and results panel should be.
+UPLOAD = ("notes.txt", b"caf\xe9 uploaded body", "text/plain")
+UPLOAD_TEXT = "caf\ufffd uploaded body"
 
 
 @pytest.fixture
@@ -411,6 +418,37 @@ class TestRunInteraction:
             == SAMPLE_TEXTS["Product review"]
         )
 
+    def test_upload_feeds_the_run(self, patched_model: MagicMock) -> None:
+        # The only test that exercises the Upload source: the decode, the
+        # preview, and the uploaded text reaching the run.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.file_uploader(key="upload").set_value(UPLOAD)
+        at.run()
+        assert not at.exception
+        assert at.button(key="run").disabled is False
+        assert any(text.value == UPLOAD_TEXT for text in at.text)  # the preview
+        at.button(key="run").click().run()
+        assert not at.exception
+        assert at.session_state["results"]["signature"][0] == UPLOAD_TEXT
+
+    def test_input_precedence_at_the_call_site(self, patched_model: MagicMock) -> None:
+        # TestResolveInput pins the function's own precedence; this pins the
+        # argument order the script passes it — Text > Upload > Sample. Each
+        # step adds the next-higher source, so swapping any two arguments fails
+        # one of the two assertions.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.segmented_control(key="sample_select").set_value("Product review")
+        at.file_uploader(key="upload").set_value(UPLOAD)
+        at.run()
+        at.button(key="run").click().run()
+        assert at.session_state["results"]["signature"][0] == UPLOAD_TEXT
+        at.text_area(key="paste").set_value("Pasted text wins.")
+        at.run()
+        at.button(key="run").click().run()
+        assert at.session_state["results"]["signature"][0] == "Pasted text wins."
+
     def test_disabled_feature_shows_not_enabled_note(
         self, patched_model: MagicMock
     ) -> None:
@@ -464,3 +502,56 @@ class TestRunInteraction:
         at.run()  # language changed, but Run not clicked again
 
         assert any("Inputs changed" in info.value for info in at.info)
+
+
+class TestRunFailures:
+    """What the page shows when a run, or the model's output, goes wrong.
+
+    Both behaviours are argued in the app (the run guard's comment, and the
+    `st.code` rationale in `render_result`) and neither was executed by any
+    test: nothing made the mocked model raise or return unparseable output.
+    """
+
+    def test_failed_run_clears_results_and_shows_the_error(
+        self, patched_model: MagicMock
+    ) -> None:
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Some text.")
+        at.run()
+        at.button(key="run").click().run()
+        assert at.session_state["results"] is not None
+        assert len(at.metric) > 0  # the good run's answers are on screen
+        # load_model stays cached from the good run, so only generate fails.
+        with patch("mlx_lm.generate", side_effect=RuntimeError("metal OOM")):
+            at.button(key="run").click().run()
+        # The previous answers are dropped rather than left under a traceback
+        # with nothing marking them stale, and the error itself is shown.
+        assert at.session_state["results"] is None
+        assert len(at.metric) == 0
+        assert any("metal OOM" in exc.value for exc in at.exception)
+
+    def test_unparseable_output_shows_the_raw_response(
+        self, patched_model: MagicMock
+    ) -> None:
+        raw = "I think it is positive."
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Amazing product, I love it!")
+        for key in ("feature_summary", "feature_topics", "feature_intents"):
+            at.toggle(key=key).set_value(False)  # leave only Sentiment on
+        at.run()
+        with patch("mlx_lm.generate", return_value=raw):
+            at.button(key="run").click().run()
+
+        assert not at.exception
+        assert at.session_state["results"]["data"]["sentiment"]["parsed"] is None
+        assert any("Could not parse" in warning.value for warning in at.warning)
+        [code] = at.code
+        assert code.value == raw
+        # language=None serializes as "plaintext"; st.code's default would be
+        # "python", syntax-highlighting model prose as code.
+        assert code.language == "plaintext"
+        assert code.proto.wrap_lines
+        # The JSON tab falls back to the raw string rather than a null.
+        assert json.loads(at.json[0].value) == {"sentiment": raw}
