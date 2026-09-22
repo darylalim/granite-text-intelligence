@@ -26,6 +26,8 @@ The model (~7.3 GB, bf16) downloads automatically the first time you click **Run
 - **First Run is slow.** The initial click loads ~7.3 GB into unified memory; the "Loading model…" and per-feature spinners mean it's working, not hung.
 - **Out of memory?** Lower `MAX_INPUT_TOKENS` to shrink the KV cache, or switch `MODEL_NAME` to a quantized build of the same 3B — [`ibm-granite/granite-4.2-3b-q4-mlx`](https://huggingface.co/ibm-granite/granite-4.2-3b-q4-mlx) (~2.1 GB of weights, fits an 8 GB Mac) or [`ibm-granite/granite-4.2-3b-q8-mlx`](https://huggingface.co/ibm-granite/granite-4.2-3b-q8-mlx) (~3.9 GB). Quantization changes only the weights, so the KV cache per token is the same.
 - **Interrupted download?** Re-run — downloads resume from the Hugging Face cache rather than starting over.
+- **Can't open it from another device?** The app listens on this Mac only, so it prints no Network URL. To try it on a phone or tablet on the same network, start it with `uv run streamlit run streamlit_app.py --server.address 0.0.0.0` and open the Network URL it prints — anyone else on that network can then use it too.
+- **A different app opened?** Open the `http://127.0.0.1:<port>` URL the app prints rather than `localhost`. If another Streamlit app is already running on the same port, this one can start on that port too without noticing, and `localhost` then reaches the other app; `--server.port` gives this one a port of its own.
 - **Non-English input coming back in English?** "Match input" (the default) asks the model to answer in the input's language, and the 3B does so for most languages but answers **Japanese** input in English; pick the language explicitly under **Output language** and it localizes. Very short inputs can also get a summary that restates them nearly verbatim.
 
 ## Usage
@@ -51,7 +53,7 @@ cp .env.example .env
 # then edit .env and set HF_TOKEN=hf_...
 ```
 
-**Deployment:** set `HF_TOKEN` as an environment variable in your platform's secrets instead of shipping `.env`. `load_dotenv()` does not override real env vars and no-ops when no `.env` is present, so the same code works locally and in production.
+**Deployment:** set `HF_TOKEN` as an environment variable in your platform's secrets instead of shipping `.env`. `load_dotenv()` does not override real env vars and no-ops when no `.env` is present, so the same code works locally and in production. The app also listens on `127.0.0.1` only (set in `.streamlit/config.toml`), so a deployment that other machines must reach needs `STREAMLIT_SERVER_ADDRESS=0.0.0.0` or `--server.address 0.0.0.0`.
 
 ### Input length
 
@@ -67,7 +69,7 @@ MAX_INPUT_TOKENS=32768 uv run streamlit run streamlit_app.py
 - **Per-feature toggles** — in the sidebar, run exactly the analyses you want; each description lives in the toggle's tooltip
 - **Tabbed results** — full-width per-feature views plus a combined JSON view, with the settings out of the way in a collapsible sidebar
 - **Native Streamlit UI** — an IBM Carbon theme in light and dark, switchable from the settings menu, with self-hosted IBM Plex type and Material Symbol icons throughout
-- **Local and private** — runs entirely on-device via MLX; no text leaves your Mac, and with Streamlit's usage statistics turned off the page makes no third-party request
+- **Local and private** — runs entirely on-device via MLX and listens on this Mac only; no text leaves your Mac, and with Streamlit's usage statistics turned off the page makes no third-party request
 
 ## Development
 

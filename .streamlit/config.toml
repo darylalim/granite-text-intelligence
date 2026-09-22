@@ -194,6 +194,24 @@ textColor = "#161616"
 # resolve. Off by default.
 enableStaticServing = true
 
+# Listen on this Mac only. Unset, Streamlit binds every interface and prints a
+# Network URL, so anyone on the same Wi-Fi can open the app and drive the
+# owner's GPU and memory with the shared 7.3 GB model — sessions are isolated,
+# so they cannot read the owner's text, but nothing asks who they are.
+# 127.0.0.1 binds IPv4 loopback only, and under --server.headless it also skips
+# the external-IP lookup Streamlit makes to print an External URL. The IP, not
+# "localhost", which binds the same socket: on macOS that bind succeeds even
+# when another process already listens on the port's dual-stack wildcard, as
+# every Streamlit app started without this setting does, so the clash goes
+# undetected and the app keeps the port instead of moving to the next one.
+# "localhost" then resolves to ::1 first and opens the OTHER app; the banner
+# prints the address given here, and 127.0.0.1 always reaches this one. Costs:
+# no Network URL for testing on a phone or tablet on the same network, and a
+# deployment that must be reachable from other machines has to override it —
+# `--server.address 0.0.0.0` or STREAMLIT_SERVER_ADDRESS=0.0.0.0, both of which
+# take precedence over this file.
+address = "127.0.0.1"
+
 # Disables LocalSourcesWatcher. Its post-run scan of sys.modules probes every
 # module with hasattr(m, "__path__"), and transformers 5's lazy placeholder
 # modules import their real file on any attribute access — for the vision

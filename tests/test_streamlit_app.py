@@ -1136,6 +1136,20 @@ class TestThemeConfig:
             "CLAUDE.md, Configuration"
         )
 
+    def test_the_server_listens_on_this_mac_only(self) -> None:
+        # Unset, Streamlit binds every interface, and anyone on the same network
+        # can open the app and drive the shared model on the owner's GPU. A
+        # deployment overrides this with --server.address or
+        # STREAMLIT_SERVER_ADDRESS, which take precedence over this file. The
+        # IP rather than "localhost": beside another app already on the port,
+        # the printed http://localhost URL opens that app instead of this one.
+        server = self._config().get("server", {})
+        assert server.get("address") == "127.0.0.1", (
+            "server.address is not '127.0.0.1', so the app listens on every "
+            "interface or prints a URL that can reach another app — see "
+            "CLAUDE.md, Configuration"
+        )
+
     @pytest.mark.parametrize("mode", MODES)
     def test_sentiment_hues_are_pinned_per_mode(self, mode: str) -> None:
         # render_result colors the verdict through `:green[...]` and friends,
