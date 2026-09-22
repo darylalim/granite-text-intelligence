@@ -804,6 +804,101 @@ class TestInferenceLock:
         assert at.session_state["results"] is not None
 
 
+STOPPED_NOTE = "The last run was stopped"
+PANEL_AFTER_A_NOTICE = ["flex_container", "flex_container", "tab_container"]
+
+
+def _notices(at: AppTest) -> list[str]:
+    """Every notice in the results panel's reserved notices slot.
+
+    The slot is an `empty` until something fills it, and an empty has none.
+    """
+    slot = _results_panel(at).children[1]
+    if slot.type == "empty":
+        return []
+    return [n.value for n in [*slot.info, *slot.warning]]
+
+
+class TestInterruptedRun:
+    """A run stopped mid-way by a widget change says so on the next rerun.
+
+    Under runner.fastReruns a change during a run stops it with StopException
+    at its next st.* call and reruns at once; the run's finished features go
+    with it, and before this note a first run simply fell back to the pre-run
+    prompts. `run_pending` is set when a run starts and cleared only when it
+    stores its results or fails, so a stopped run leaves it set.
+    """
+
+    def test_seeded_flag_shows_the_note_in_the_notices_slot(self) -> None:
+        # No run and no results: the note alone must still land in the
+        # reserved slot, turning the `empty` into a container in place.
+        at = AppTest.from_file(APP)
+        at.session_state["run_pending"] = True
+        at.run()
+        assert not at.exception
+        panel = _results_panel(at)
+        assert [c.type for c in panel.children.values()] == PANEL_AFTER_A_NOTICE
+        assert [n for n in _notices(at) if STOPPED_NOTE in n]
+
+    def test_a_stopped_run_is_noted_beside_the_stale_results(
+        self, patched_model: MagicMock
+    ) -> None:
+        # Both notes at once: st.empty() holds one element, so the stopped
+        # note and the "Inputs changed" note must share one container — a
+        # second notice_slot.container() call would replace the first.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Original text.")
+        at.button(key="run").click().run()
+        before = at.session_state["results"]
+        at.text_area(key="paste").set_value("Different text now.")
+        with patch("mlx_lm.generate", side_effect=_stop_mid_run):
+            at.button(key="run").click().run()
+        assert at.session_state["run_pending"] is True
+        assert at.session_state["results"] == before  # nothing new was stored
+        at.run()  # the rerun the stopping change asked for
+        panel = _results_panel(at)
+        assert [c.type for c in panel.children.values()] == PANEL_AFTER_A_NOTICE
+        notices = _notices(at)
+        assert [n for n in notices if STOPPED_NOTE in n]
+        assert [n for n in notices if "Inputs changed" in n]
+
+    @pytest.mark.parametrize(
+        "generate",
+        [
+            pytest.param(_fake_generate, id="finished"),
+            pytest.param(RuntimeError("metal OOM"), id="failed"),
+        ],
+    )
+    def test_a_run_that_ends_clears_the_flag(
+        self, patched_model: MagicMock, generate: object
+    ) -> None:
+        # A failure is reported by the traceback, not as an interruption.
+        at = AppTest.from_file(APP)
+        at.session_state["run_pending"] = True  # an earlier run was stopped
+        at.run()
+        at.text_area(key="paste").set_value("Some text.")
+        with patch("mlx_lm.generate", side_effect=generate):
+            at.button(key="run").click().run()
+        assert at.session_state["run_pending"] is False
+        at.run()
+        assert not [n for n in _notices(at) if STOPPED_NOTE in n]
+
+    def test_an_empty_click_keeps_the_note(self) -> None:
+        # A click with no input starts nothing, so it says nothing about the
+        # last run: the stopped note stays beside the no-input warning.
+        with patch("mlx_lm.generate") as generate:
+            at = AppTest.from_file(APP)
+            at.session_state["run_pending"] = True
+            at.run()
+            at.button(key="run").click().run()
+        generate.assert_not_called()
+        assert at.session_state["run_pending"] is True
+        assert [n for n in _notices(at) if STOPPED_NOTE in n]
+        status_slot = _results_panel(at).children[0]
+        assert any("Nothing to analyze" in w.value for w in status_slot.warning)
+
+
 class TestRunFailures:
     """What the page shows when a run, or the model's output, goes wrong.
 

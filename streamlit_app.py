@@ -249,6 +249,9 @@ st.set_page_config(
 )
 
 st.session_state.setdefault("results", None)
+# True from the moment a run starts until it stores its results or fails;
+# still True afterwards means it was stopped mid-run (see the notices).
+st.session_state.setdefault("run_pending", False)
 
 
 @st.cache_resource(max_entries=1, show_spinner=False)
@@ -929,8 +932,8 @@ with st.container():
     # clearStaleNodes at end-of-run — so the previous run's "Inputs changed
     # since this run" note would stay on screen, faded but readable, for the
     # whole of a run it no longer describes. st.empty() clears at the top of
-    # the rerun instead; the child container is what lets one slot hold both
-    # notices. The results themselves are unavoidably the previous run's until
+    # the rerun instead; the child container is what lets one slot hold every
+    # notice. The results themselves are unavoidably the previous run's until
     # inference returns, which is why the tab bodies stay below. Sitting
     # directly under the Run row, the notices land next to the button they
     # tell the user to click.
@@ -945,6 +948,19 @@ with st.container():
     json_tab = tabs[0]
     feature_tabs = {feature["key"]: tab for feature, tab in zip(FEATURES, tabs[1:])}
 
+    # A run that was still going when a widget changed never finished:
+    # with runner.fastReruns on (the default) the change stops it at its next
+    # st.* call — StopException, which the run guard's `except Exception`
+    # never sees — and starts this rerun at once, while the stopped thread
+    # may still be inside generate(). Its finished features are dropped with
+    # it, and on a first run the panel would simply fall back to the pre-run
+    # prompts, so run_pending, left set, is what tells this rerun to say so.
+    # Streamlit's own Stop button, which the status widget shows during a
+    # run, ends it the same way but reruns nothing, so the note waits for the
+    # next interaction — which is why it names no cause. A click that starts
+    # a run is not reporting on the last one.
+    interrupted = st.session_state.run_pending and not (run and input_text)
+
     if run and not input_text:
         # Run stays enabled without input (see the Run row), so a click can
         # arrive with nothing to analyze. Say so where the run status goes and
@@ -956,6 +972,7 @@ with st.container():
                 icon=":material/edit:",
             )
     elif run:
+        st.session_state.run_pending = True
         with status_slot:
             lock = _inference_lock()
             acquired = False
@@ -992,6 +1009,7 @@ with st.container():
                     "truncated": was_truncated,
                     "signature": _run_signature(input_text, enabled, language),
                 }
+                st.session_state.run_pending = False
             except Exception as exc:  # noqa: BLE001 (top-level run guard)
                 # Drop the previous run's results. The tabs are painted above
                 # by the time this lands, so keeping them would show the *old*
@@ -999,25 +1017,36 @@ with st.container():
                 # stale — and the "Inputs changed" note reads as "you edited
                 # something", not "this run failed".
                 st.session_state.results = None
+                st.session_state.run_pending = False
                 st.exception(exc)
             finally:
                 if acquired:
                     lock.release()
 
     results = cast("dict[str, Any] | None", st.session_state.results)
-    if results is not None:
+    # One `with` for every notice: st.empty() holds a single element, so a
+    # second notice_slot.container() would replace the first.
+    if interrupted or results is not None:
         with notice_slot.container():
-            if results["truncated"]:
-                st.warning(
-                    f"Input was truncated to the first {MAX_INPUT_TOKENS:,} tokens.",
-                    icon=":material/content_cut:",
-                )
-            current_signature = _run_signature(input_text, enabled, language)
-            if results["signature"] != current_signature:
+            if interrupted:
                 st.info(
-                    "Inputs changed since this run — click Run to refresh.",
-                    icon=":material/sync:",
+                    "The last run was stopped before it finished — click Run "
+                    "to run it again.",
+                    icon=":material/stop_circle:",
                 )
+            if results is not None:
+                if results["truncated"]:
+                    st.warning(
+                        "Input was truncated to the first "
+                        f"{MAX_INPUT_TOKENS:,} tokens.",
+                        icon=":material/content_cut:",
+                    )
+                current_signature = _run_signature(input_text, enabled, language)
+                if results["signature"] != current_signature:
+                    st.info(
+                        "Inputs changed since this run — click Run to refresh.",
+                        icon=":material/sync:",
+                    )
 
     with json_tab:
         if results is not None and results["data"]:
