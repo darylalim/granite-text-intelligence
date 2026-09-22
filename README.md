@@ -98,3 +98,5 @@ Committing `pyproject.toml` alone fails CI at `uv sync --locked`, which cuts no 
 ## License
 
 This project's code is released under the [Apache License 2.0](LICENSE). The IBM Granite model it loads is distributed separately under [its own Apache 2.0 license](https://huggingface.co/ibm-granite/granite-4.2-3b) and is downloaded at runtime, not included in this repository.
+
+The [IBM Plex](https://github.com/IBM/plex) font files bundled in `static/fonts/` are third-party assets under the [SIL Open Font License 1.1](static/fonts/LICENSE.txt), not Apache-2.0.

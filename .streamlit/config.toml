@@ -1,7 +1,7 @@
 # IBM Carbon Gray 100 theme for Granite Text Intelligence.
 #
 # On-brand for the IBM Granite model this app runs: Carbon v11 tokens, IBM Plex
-# Sans/Mono (Google Fonts, no local font files), IBM Blue 60 primary. Both
+# Sans/Mono vendored under static/fonts/, IBM Blue 60 primary. Both
 # [theme.light] and [theme.dark] are defined, which is what keeps the appearance
 # toggle in the settings menu — a lone [theme] block would lock one mode silently.
 #
@@ -12,26 +12,32 @@
 #     "negative" sentiment verdict wears, and the stock accent put it 0 deg away
 #     from the Run button, the active tab and every toggle. Blue 60 is 137.7 deg
 #     off, and white on it is 5.00:1 where the stock red was 3.30:1.
-#   * Every sentiment hue is pinned as an explicit <color>TextColor in BOTH modes.
+#   * Every sentiment hue, and yellow, is pinned as an explicit <color>TextColor in
+#     BOTH modes.
 #     Streamlit derives the text variant by lightening on dark and darkening on
 #     light, which turned this theme's earlier incarnation's Red 50 into a salmon
-#     #fc979c. Pinned, the metric renders the Carbon token itself.
+#     #fc979c. Pinned, the metric renders the Carbon token itself. Yellow is in the
+#     set for a different reason: it is what st.warning renders in — the app's one
+#     alert, for truncated input and unparseable JSON — and its derived light-mode
+#     text is 2.59:1 over its own tint, which no sentiment check would have seen.
 #   * baseFontSize = 15. IBM Plex Sans at the 16 px root sets the five-tab results
 #     strip at 397 px against a 404 px floor; at 15 it measures 372 px of 414. It
 #     rescales every rem dimension with it (run row 37.5 px, wide padding 75 px).
-#   * The fonts are SELF-HOSTED, not fetched from Google Fonts. The ten woff2 files
-#     in static/fonts/ are the same latin and latin-ext subsets fonts.googleapis.com
-#     serves (231 KB; IBM Plex is SIL OFL 1.1 and static/fonts/LICENSE.txt travels
-#     with them), wired up by the [[theme.fontFaces]] tables below and served by
-#     server.enableStaticServing. So the app is identical offline — no font request
-#     leaves the machine, no FOUT, and the 372 px strip measurement cannot depend
-#     on the network. (One third-party request does survive and is not a font:
-#     page_icon=":material/psychology:" makes Streamlit fetch that symbol's SVG
-#     favicon from fonts.gstatic.com. The Material Symbols *font* is bundled.) Each face declares its unicodeRange: without it the browser
-#     stops at the first matching face and latin-ext never loads, which would put
-#     Czech output (e s c r z u with carons) in the fallback face. Source Sans /
-#     Source Code Pro remain named in the stacks as the fallback if a file is
-#     missing. Changing a fontFaces table needs a server restart, not a rerun.
+#   * The fonts are SELF-HOSTED, not fetched from Google Fonts: six woff2 files in
+#     static/fonts/, 124 KB, one Plex Sans variable font per subset plus Plex Mono
+#     at 400 and 600. IBM Plex is SIL OFL 1.1 and static/fonts/LICENSE.txt travels
+#     with them. They are wired up by the [[theme.fontFaces]] tables below and
+#     served by server.enableStaticServing, so the app renders the same offline —
+#     no font request leaves the machine, no FOUT, and the 372 px strip figure
+#     cannot depend on the network. Only the LATIN and LATIN-EXT subsets are
+#     vendored, which is narrower than the Google URL this replaced: it also
+#     served cyrillic, greek and vietnamese on demand, so text in those scripts
+#     now falls back to Source Sans. That covers the 12 output languages (Czech
+#     is the one that needs latin-ext) but not every possible *input*. One
+#     third-party request does survive and is not a font: page_icon=
+#     ":material/psychology:" makes Streamlit fetch that symbol's SVG favicon
+#     from fonts.gstatic.com. The Material Symbols *font* is bundled. Changing a
+#     fontFaces table needs a server restart, not a rerun.
 #
 # Known trade: primaryColor is also the selected tab-label and selected-chip *text*
 # color, and Blue 60 on #161616 is 3.62:1 — above the 3.0 non-text floor, below AA
@@ -57,10 +63,29 @@ baseRadius = "none"                        # Carbon: square buttons, fields, chi
 showWidgetBorder = true
 showSidebarBorder = true                   # the hairline between the sidebar rail and the workspace
 linkUnderline = false
-yellowColor = "#f1c21b"                    # Carbon Yellow 30 (support-warning), both modes
 
-# Self-hosted IBM Plex — see the header; the unicodeRange on each face is what
-# makes the browser fetch the latin-ext file as well as the latin one.
+# Self-hosted IBM Plex. Two things are going on here. The unicodeRange on each
+# face is what makes the browser fetch the latin-ext file as well as the latin
+# one. And Plex Sans ships as a *variable* font: Google serves one identical
+# file for wght 400, 500 and 600, so declaring it once per subset with the axis
+# range replaces three byte-identical copies — and three cold-load fetches of
+# the same 40 KB under three URLs, which share no cache. Plex Mono is not
+# variable (its 400 and 600 are genuinely different files), so it keeps one
+# face per weight.
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-var-latin.woff2"
+weight = "100 700"
+style = "normal"
+unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/IBMPlexSans-var-latin-ext.woff2"
+weight = "100 700"
+style = "normal"
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
+
 [[theme.fontFaces]]
 family = "IBM Plex Mono"
 url = "app/static/fonts/IBMPlexMono-400-latin.woff2"
@@ -89,48 +114,6 @@ weight = 600
 style = "normal"
 unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
 
-[[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/IBMPlexSans-400-latin.woff2"
-weight = 400
-style = "normal"
-unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
-
-[[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/IBMPlexSans-400-latin-ext.woff2"
-weight = 400
-style = "normal"
-unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
-
-[[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/IBMPlexSans-500-latin.woff2"
-weight = 500
-style = "normal"
-unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
-
-[[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/IBMPlexSans-500-latin-ext.woff2"
-weight = 500
-style = "normal"
-unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
-
-[[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/IBMPlexSans-600-latin.woff2"
-weight = 600
-style = "normal"
-unicodeRange = "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD"
-
-[[theme.fontFaces]]
-family = "IBM Plex Sans"
-url = "app/static/fonts/IBMPlexSans-600-latin-ext.woff2"
-weight = 600
-style = "normal"
-unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF"
-
 # Carbon Gray 100: background #161616, layer-01 #262626, border-subtle #393939
 [theme.dark]
 backgroundColor = "#161616"
@@ -154,6 +137,9 @@ grayTextColor = "#a8a8a8"                  # Gray 40, 7.61:1 — reads neutral b
 blueColor = "#4589ff"                      # Blue 50, support-info
 blueTextColor = "#78a9ff"
 violetColor = "#a56eff"                    # Purple 40
+yellowColor = "#f1c21b"                    # Yellow 30, support-warning — st.warning's tint
+yellowTextColor = "#f1c21b"                # 6.89:1 over that tint (the derived value passes
+                                           # here too; pinned so both modes read alike)
 
 # The shell sits one Carbon step below the workspace; its field sits at the workspace tone
 [theme.dark.sidebar]
@@ -186,6 +172,11 @@ grayTextColor = "#525252"                  # Gray 70, text-secondary, 7.10:1
 blueColor = "#0f62fe"                      # Blue 60, support-info
 blueTextColor = "#0043ce"                  # Blue 70
 violetColor = "#8a3ffc"                    # Purple 60
+yellowColor = "#f1c21b"                    # Yellow 30, support-warning — st.warning's tint
+yellowTextColor = "#684e00"                # Yellow 70. Pinned because the DERIVED value
+                                           # (#b6910c) measures 2.59:1 over the 10%-opacity
+                                           # tint st.warning composites onto Gray 10 — the
+                                           # app's one alert, unreadable. Yellow 70 is 6.81:1.
 
 # The same rule in the other direction: the rail at the tonal extreme, fields at Gray 10
 [theme.light.sidebar]

@@ -1,3 +1,4 @@
+import colorsys
 import hashlib
 import json
 import os
@@ -769,17 +770,41 @@ class TestThemeConfig:
     def _theme(cls) -> dict:
         return cls._config()["theme"]
 
-    @staticmethod
-    def _flatten(section: dict, prefix: str) -> list[tuple[str, object]]:
+    @classmethod
+    def _flatten(cls, section: dict, prefix: str) -> list[tuple[str, object]]:
         """Flatten a theme table to Streamlit's dotted option keys."""
         items: list[tuple[str, object]] = []
         for key, value in section.items():
             path = f"{prefix}.{key}"
             if isinstance(value, dict):
-                items.extend(TestThemeConfig._flatten(value, path))
+                items.extend(cls._flatten(value, path))
             else:
                 items.append((path, value))
         return items
+
+    @staticmethod
+    def _relative_luminance(hex_color: str) -> float:
+        channels = []
+        for pair in (hex_color[1:3], hex_color[3:5], hex_color[5:7]):
+            c = int(pair, 16) / 255
+            channels.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+        r, g, b = channels
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    @classmethod
+    def _contrast(cls, one: str, two: str) -> float:
+        a, b = cls._relative_luminance(one), cls._relative_luminance(two)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+    @staticmethod
+    def _hue(hex_color: str) -> float:
+        rgb = [int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+        return colorsys.rgb_to_hls(*rgb)[0] * 360
+
+    @classmethod
+    def _hue_distance(cls, one: str, two: str) -> float:
+        gap = abs(cls._hue(one) - cls._hue(two)) % 360
+        return min(gap, 360 - gap)
 
     def test_defines_both_light_and_dark(self) -> None:
         # The mechanical hazard a custom theme introduces: a lone [theme] block
@@ -824,10 +849,14 @@ class TestThemeConfig:
         # enum can produce, in both modes, is the fix; dropping one restores
         # the derivation silently.
         section = self._theme()[mode]
+        # Yellow is in the set for a different reason than the other four: it is
+        # not a sentiment hue, it is what `st.warning` renders in — the app's one
+        # alert, shown for truncated input and unparseable JSON. Its derived
+        # light-mode text measured 2.59:1 over its own tint, which no sentiment
+        # assertion would ever have looked at.
+        pinned = sorted(set(_SENTIMENT_COLOR.values()) | {"yellow"})
         missing = [
-            f"{name}TextColor"
-            for name in sorted(set(_SENTIMENT_COLOR.values()))
-            if f"{name}TextColor" not in section
+            f"{name}TextColor" for name in pinned if f"{name}TextColor" not in section
         ]
         assert not missing, (
             f"[theme.{mode}] leaves {missing} to Streamlit's derivation — "
@@ -875,6 +904,71 @@ class TestThemeConfig:
         ]
         assert not undeclared, (
             f"faces with no unicodeRange, so a later subset never loads: {undeclared}"
+        )
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_primary_does_not_collide_with_the_negative_verdict(
+        self, mode: str
+    ) -> None:
+        # This is the reason the theme exists, and until now it was the one
+        # load-bearing value with no guard. Streamlit's built-in primary is
+        # #ff4b4b and `negative` sentiment renders red, so the verdict wore the
+        # same hue as the Run button, the active tab underline and every
+        # toggle — 0 degrees apart — while white on that primary was 3.30:1,
+        # under AA for the button label. Both properties are asserted rather
+        # than the chosen hex, so the theme can be recolored freely and only a
+        # change that reintroduces the collision fails.
+        theme = self._theme()
+        primary = theme[mode].get("primaryColor", theme.get("primaryColor"))
+        negative = theme[mode][f"{_SENTIMENT_COLOR['negative']}TextColor"]
+        separation = self._hue_distance(primary, negative)
+        assert separation >= 60, (
+            f"[theme.{mode}] primaryColor {primary} is only {separation:.1f}° from the "
+            f"{negative} the negative verdict renders in — the collision the theme "
+            "exists to fix; see CLAUDE.md, Configuration."
+        )
+        on_primary = self._contrast("#ffffff", primary)
+        assert on_primary >= 4.5, (
+            f"[theme.{mode}] white on primaryColor {primary} is {on_primary:.2f}:1, "
+            "under AA for the Run button's label"
+        )
+
+    def test_base_font_size_fits_the_results_tab_strip(self) -> None:
+        # CLAUDE.md carries this as a Rule. IBM Plex Sans at Streamlit's 16 px
+        # default root sets the five-tab results strip at 397 px against a
+        # 404 px floor, and `st.tabs` does not warn when it overflows — it
+        # degrades into a scrolling strip that hides whichever label is
+        # furthest from the active one. At 15 the strip measures 372 px of 414.
+        # The value is pinned rather than the consequence because nothing in a
+        # headless test can measure rendered text; the Layout section's
+        # 37.5 / 75 / 414 / 15 px figures are all derived from this root too.
+        assert self._theme()["baseFontSize"] == 15, (
+            "baseFontSize is what fits IBM Plex under the results-strip ceiling and "
+            "what every rem figure in CLAUDE.md's Layout section is measured against"
+        )
+
+    def test_font_face_keys_are_ones_streamlit_parses(self) -> None:
+        # Streamlit builds each face with ParseDict(font_face, FontFace()),
+        # inside a bare `except Exception` that logs a warning — so one
+        # mis-cased key (`Weight`, `unicoderange`) raises, is swallowed, and
+        # **that whole face is dropped**, leaving its text in the fallback font
+        # with a green gate. The other font tests only catch a bad `url` or
+        # `family`, and then only incidentally via KeyError. The accepted names
+        # are read off Streamlit's own proto rather than hardcoded, so an
+        # upstream rename fails loudly here instead of quietly narrowing what
+        # this accepts; `weight` is the documented legacy alias for
+        # `weight_range` that app_session rewrites before parsing.
+        from streamlit.proto.NewSession_pb2 import FontFace
+
+        accepted = {field.name for field in FontFace.DESCRIPTOR.fields}
+        accepted |= {field.json_name for field in FontFace.DESCRIPTOR.fields}
+        accepted.add("weight")
+        unknown = sorted(
+            {key for face in self._theme()["fontFaces"] for key in face} - accepted
+        )
+        assert not unknown, (
+            f"keys Streamlit's FontFace parser rejects, which silently drops the whole "
+            f"face: {unknown}"
         )
 
     def test_sentiment_colors_are_builtin_names(self) -> None:
