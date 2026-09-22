@@ -247,9 +247,14 @@ st.set_page_config(
     # results panels are full-width blocks in what is left; the centered layout
     # would cap both at 736 px on any display. initial_sidebar_state stays at
     # its "auto" default — expanded on desktop, collapsed at or below 768 px.
-    # "locked" (1.59.0) and an integer width exist on 1.64 but postdate the
-    # >=1.57 floor; adopting either means raising the floor itself, not just
-    # listing the API — see CLAUDE.md, Dependencies.
+    # Neither an integer width nor "locked" could stop a dragged sidebar
+    # clipping the results strip (see the results panel below): the frontend
+    # reads a width the browser stored from an earlier drag before anything
+    # set here, and keeps the resize handle live from 200 to 600 px. An
+    # integer (1.53.0, inside the floor) only sizes a browser that has stored
+    # nothing — and is what a double-click on the handle resets to — and
+    # "locked" (1.59.0) only hides the collapse button. See CLAUDE.md,
+    # Architecture.
     layout="wide",
 )
 
@@ -931,8 +936,9 @@ with st.container(horizontal=True, vertical_alignment="center"):
 # clips, and no Mac window is that narrow) — which is what retired the 2:3
 # column split that used to buy the room. The one way back to a clipped strip
 # is the sidebar itself: it is user-draggable and its width is remembered, so
-# past ~463 px at a 1000 px window the strip collapses on every later load;
-# the 1.64 options that could bound it are post-floor (see set_page_config).
+# past ~463 px at a 1000 px window the strip collapses on every later load,
+# until a double-click on the sidebar's edge resets it to 300 px. No
+# set_page_config option can bound the drag (see there).
 # The wrapper container makes the panel one addressable block — one `with`,
 # one node whose children TestResultsPanelStructure pins as exactly [status,
 # notices, tabs]. It does not protect against something emitted above it at
