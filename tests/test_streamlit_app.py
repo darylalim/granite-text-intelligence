@@ -638,6 +638,19 @@ class TestRenderResult:
         ]
 
     @patch("streamlit_app.st")
+    def test_topics_table_limited_to_configured_columns(
+        self, mock_st: MagicMock
+    ) -> None:
+        # _topic_rows keeps each object whole, so a key the schema never asked
+        # for reaches st.dataframe; column_order is what keeps it off screen,
+        # and it must name exactly the columns column_config styles.
+        topic = {"label": "a", "confidence": 0.9, "keywords": ["k"], "note": "n"}
+        render_result("topics", {"raw": "x", "parsed": {"topics": [topic]}})
+        kwargs = mock_st.dataframe.call_args.kwargs
+        assert kwargs["column_order"] == ("label", "confidence")
+        assert set(kwargs["column_order"]) == set(kwargs["column_config"])
+
+    @patch("streamlit_app.st")
     def test_numeric_confidence_rendered_as_percent(self, mock_st: MagicMock) -> None:
         render_result(
             "sentiment",

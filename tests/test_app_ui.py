@@ -400,6 +400,8 @@ class TestRunInteraction:
         # The promoted row's missing confidence is a null, not a raise or a
         # dropped row — that is what renders as the empty progress bar.
         assert frame["confidence"].isna().tolist() == [False, True]
+        # Only the two configured columns are shown, whatever else a row holds.
+        assert list(at.dataframe[0].proto.column_order) == ["label", "confidence"]
 
     def test_sample_selection_feeds_the_run(self, patched_model: MagicMock) -> None:
         # Selecting a built-in sample resolves as the input (precedence falls

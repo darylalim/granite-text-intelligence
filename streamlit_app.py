@@ -596,6 +596,12 @@ def render_result(key: str, result: dict[str, Any]) -> None:
             st.dataframe(
                 rows,
                 hide_index=True,
+                # Only the two configured columns. _topic_rows keeps each topic
+                # object whole, so any extra key the model adds (a `keywords`
+                # list, a `description`) would otherwise render as a raw,
+                # lowercase-headed column. A listed column that no row has is
+                # skipped, and the JSON tab still shows the full object.
+                column_order=("label", "confidence"),
                 column_config={
                     "label": st.column_config.TextColumn("Topic"),
                     "confidence": st.column_config.ProgressColumn(
