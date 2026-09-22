@@ -21,6 +21,7 @@ from streamlit_app import (
     MAX_INPUT_TOKENS,
     MODEL_MAX_TOKENS,
     _effective_max_tokens,
+    _escape_markdown,
     _resolve_max_input_tokens,
     _topic_rows,
     language_directive,
@@ -486,6 +487,89 @@ class TestRenderResult:
     def test_non_list_topics_not_sent_to_dataframe(self, mock_st: MagicMock) -> None:
         render_result("topics", {"raw": "x", "parsed": {"topics": "politics"}})
         mock_st.dataframe.assert_not_called()
+        mock_st.caption.assert_called_once_with("No topics found.")
+
+    # Two dollar amounts in one paragraph, and an image the browser would fetch:
+    # both are live syntax in any Markdown-parsing element, and AppTest never
+    # runs the frontend that parses it, so the pins below are on call sites.
+    FREE_TEXT = "Paid $120, billed $120 again. ![x](https://example.com/p.png)"
+
+    @pytest.mark.parametrize(
+        "key, result",
+        [
+            pytest.param("summary", {"raw": FREE_TEXT, "parsed": None}, id="summary"),
+            pytest.param(
+                "intents",
+                {"raw": "x", "parsed": {"intent": "refund", "rationale": FREE_TEXT}},
+                id="intent-rationale",
+            ),
+            pytest.param(
+                "sentiment",
+                {"raw": "x", "parsed": {"sentiment": "mixed", "rationale": FREE_TEXT}},
+                id="sentiment-rationale",
+            ),
+        ],
+    )
+    @patch("streamlit_app.st")
+    def test_free_text_is_rendered_as_plain_text(
+        self, mock_st: MagicMock, key: str, result: dict
+    ) -> None:
+        # st.text does no Markdown parsing; st.write(str) is st.markdown, which
+        # turned the "$120 … $120" pair into inline math and fetched the image.
+        render_result(key, result)
+        mock_st.text.assert_called_once_with(self.FREE_TEXT, width="stretch")
+        mock_st.write.assert_not_called()
+        mock_st.markdown.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "key, parsed",
+        [
+            pytest.param("intents", {"intent": FREE_TEXT}, id="intent"),
+            pytest.param("sentiment", {"sentiment": FREE_TEXT}, id="out-of-enum"),
+        ],
+    )
+    @patch("streamlit_app.st")
+    def test_metric_value_is_markdown_escaped(
+        self, mock_st: MagicMock, key: str, parsed: dict
+    ) -> None:
+        # A metric value is always Markdown, so model text there is escaped.
+        render_result(key, {"raw": "x", "parsed": parsed})
+        _, value = mock_st.metric.call_args[0]
+        assert value == _escape_markdown(self.FREE_TEXT)
+
+    @patch("streamlit_app.st")
+    def test_non_numeric_confidence_is_markdown_escaped(
+        self, mock_st: MagicMock
+    ) -> None:
+        render_result(
+            "sentiment",
+            {"raw": "x", "parsed": {"sentiment": "positive", "confidence": "$1-$2"}},
+        )
+        mock_st.caption.assert_called_once_with(r"Confidence: \$1\-\$2")
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            pytest.param("$5 and $10", r"\$5 and \$10", id="dollar-pair"),
+            pytest.param(
+                "![x](https://e.io/p.png)",
+                r"\!\[x\]\(https\:\/\/e\.io\/p\.png\)",
+                id="image",
+            ),
+            pytest.param(":red[x]", r"\:red\[x\]", id="color-directive"),
+            pytest.param(
+                ":material/warning: :tada:",
+                r"\:material\/warning\: \:tada\:",
+                id="icon-and-emoji",
+            ),
+            pytest.param("__init__ **b**", r"\_\_init\_\_ \*\*b\*\*", id="emphasis"),
+            pytest.param("&copy;", r"\&copy\;", id="entity"),
+            pytest.param(r"a\b", r"a\\b", id="backslash"),
+            pytest.param("positive review", "positive review", id="plain-untouched"),
+        ],
+    )
+    def test_escape_markdown(self, text: str, expected: str) -> None:
+        assert _escape_markdown(text) == expected
 
     @pytest.mark.parametrize(
         "topics, expected",

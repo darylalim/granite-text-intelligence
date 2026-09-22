@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import string
 from pathlib import Path
 from typing import Any, cast
 
@@ -466,6 +467,32 @@ def run_feature(
     return {"raw": raw.strip(), "parsed": parsed}
 
 
+# CommonMark lets a backslash escape any ASCII punctuation character — exactly
+# string.punctuation — so escaping all of them needs no list of which syntax
+# is live. Verified on 1.64: `$` math, `![…](…)` images, `:red[…]` and
+# `:tada:` directives, `&copy;` entities and emphasis all render as typed, and
+# so does `:material/…:` — the frontend rewrites that one in the raw source
+# before parsing, so an escaped `:` alone would not stop it; the escaped `/`
+# does. What survives is what the frontend rewrites in the parsed *text*: GFM
+# autolinks, the `:streamlit:` logo, `:material_<name>:` icons and `->`, `>=`,
+# `--` typography. None of those fetches anything.
+_MARKDOWN_SPECIAL = re.compile(f"([{re.escape(string.punctuation)}])")
+
+
+def _escape_markdown(text: str) -> str:
+    """Backslash-escape `text` so a Markdown-parsing element shows it literally.
+
+    For model output that has to reach an element with no plain-text mode —
+    an `st.metric` value, an `st.caption` — where free text is otherwise read
+    as Markdown: a pair of dollar amounts in one line becomes inline math and
+    loses both `$` signs, and an echoed `![x](https://…)` renders an <img> the
+    browser fetches. Streamlit ships no public escape helper. Where an element
+    that does no parsing fits (the summary, the rationales), `st.text` is used
+    instead and nothing needs escaping.
+    """
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", text)
+
+
 def _render_confidence(parsed: dict[str, Any]) -> None:
     """Show the confidence value as a percentage when numeric, else verbatim."""
     confidence = parsed.get("confidence")
@@ -474,7 +501,9 @@ def _render_confidence(parsed: dict[str, Any]) -> None:
     if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
         st.caption(f"Confidence: {confidence:.0%}")
     else:
-        st.caption(f"Confidence: {confidence}")
+        # st.caption is full Markdown, and this value is whatever the model
+        # put in the field.
+        st.caption(f"Confidence: {_escape_markdown(str(confidence))}")
 
 
 # Color the sentiment metric value by its enum, via Streamlit's `:color[…]`
@@ -538,11 +567,17 @@ def render_result(key: str, result: dict[str, Any]) -> None:
     """Render one feature's result using native components.
 
     Model output shape is untrusted, so values passed to widgets that reject
-    odd types (st.metric, st.dataframe) are guarded/coerced.
+    odd types (st.metric, st.dataframe) are guarded/coerced. Its *text* is
+    untrusted too, and is never handed to Markdown as-is: free text goes to
+    st.text, which does no parsing, and the model strings that must sit in a
+    Markdown-parsing element are escaped first (see _escape_markdown).
     """
     raw, parsed = result["raw"], result["parsed"]
     if key == "summary":
-        st.write(raw)
+        # st.text, not st.write: st.write(str) is st.markdown, which turned
+        # "paid $120 … billed $120" into inline math, and the prompt asks for
+        # plain prose anyway. st.text is proportional and wraps.
+        st.text(raw, width="stretch")
         return
     if parsed is None:
         st.warning("Could not parse JSON output; showing the raw response.")
@@ -568,19 +603,26 @@ def render_result(key: str, result: dict[str, Any]) -> None:
                 },
             )
         else:
-            st.write("No topics found.")
+            st.caption("No topics found.")
     elif key == "intents":
-        st.metric("Intent", str(parsed.get("intent", "—")))
+        # A metric value is always Markdown; there is no switch to turn it off.
+        st.metric("Intent", _escape_markdown(str(parsed.get("intent", "—"))))
         _render_confidence(parsed)
         if parsed.get("rationale"):
-            st.write(str(parsed["rationale"]))
+            st.text(str(parsed["rationale"]), width="stretch")
     elif key == "sentiment":
         sentiment = str(parsed.get("sentiment", "—"))
         color = _SENTIMENT_COLOR.get(sentiment.lower())
-        st.metric("Sentiment", f":{color}[{sentiment}]" if color else sentiment)
+        # The :color[…] directive is only ever built around one of the four
+        # allow-listed enum words (in whatever case the model used), so it
+        # carries no model-chosen syntax; anything else is escaped.
+        st.metric(
+            "Sentiment",
+            f":{color}[{sentiment}]" if color else _escape_markdown(sentiment),
+        )
         _render_confidence(parsed)
         if parsed.get("rationale"):
-            st.write(str(parsed["rationale"]))
+            st.text(str(parsed["rationale"]), width="stretch")
 
 
 def _run_signature(
