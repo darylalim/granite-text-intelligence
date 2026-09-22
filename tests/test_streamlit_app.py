@@ -11,6 +11,7 @@ import pytest
 
 from streamlit_app import (
     _DEFAULT_MAX_INPUT_TOKENS,
+    _MAX_CHARS_PER_TOKEN,
     _PAGE_ICON,
     _SENTIMENT_COLOR,
     FEATURES,
@@ -267,6 +268,44 @@ class TestTruncateToTokens:
         truncate_to_tokens("hello", tokenizer)
 
         tokenizer.encode.assert_called_once_with("hello", add_special_tokens=False)
+
+    def test_a_huge_input_encodes_only_the_prefix(self) -> None:
+        # Encoding costs ~180 MB of memory per MB of text; five times the
+        # prefix must still hand the tokenizer the prefix and nothing more.
+        limit = MAX_INPUT_TOKENS * _MAX_CHARS_PER_TOKEN
+        tokenizer = MagicMock()
+        tokenizer.encode.return_value = list(range(MAX_INPUT_TOKENS + 50))
+
+        truncate_to_tokens("word " * limit, tokenizer)
+
+        [call] = tokenizer.encode.call_args_list
+        assert len(call.args[0]) == limit
+
+    @pytest.mark.parametrize(
+        "extra_chars, expected_truncated",
+        [
+            pytest.param(0, False, id="text-fits-the-prefix"),
+            pytest.param(1, True, id="text-runs-past-the-prefix"),
+        ],
+    )
+    def test_text_past_the_prefix_is_truncated(
+        self, extra_chars: int, expected_truncated: bool
+    ) -> None:
+        # The prefix alone comes back within budget here, so only the length
+        # check can report the characters it never encoded: no token spans
+        # more than _MAX_CHARS_PER_TOKEN of them, so they cannot fit.
+        max_tokens = 10
+        limit = max_tokens * _MAX_CHARS_PER_TOKEN
+        text = "x" * (limit + extra_chars)
+        tokenizer = MagicMock()
+        tokenizer.encode.return_value = list(range(max_tokens))
+        tokenizer.decode.return_value = "truncated text"
+
+        out, truncated = truncate_to_tokens(text, tokenizer, max_tokens)
+
+        tokenizer.encode.assert_called_once_with(text[:limit], add_special_tokens=False)
+        assert truncated is expected_truncated
+        assert out == ("truncated text" if expected_truncated else text)
 
 
 @pytest.fixture

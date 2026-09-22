@@ -259,12 +259,32 @@ def load_model() -> tuple[nn.Module, TokenizerWrapper]:
     return cast("tuple[nn.Module, TokenizerWrapper]", load(MODEL_NAME))
 
 
+# The longest token in Granite 4.2's vocabulary, in characters: a run of 128
+# spaces, measured over all 100,352 entries. The tokenizer is byte-level BPE
+# with no normalizer, so a token's length is the number of text bytes it
+# covers, and no character is less than a byte. max_tokens tokens can
+# therefore never cover more than max_tokens * 128 characters, which is what
+# lets truncate_to_tokens encode only that much. A property of this
+# vocabulary, not a law: CLAUDE.md's smoke test asserts it, so a MODEL_NAME
+# change re-checks the bound.
+_MAX_CHARS_PER_TOKEN = 128
+
+
 def truncate_to_tokens(
     text: str, tokenizer: TokenizerWrapper, max_tokens: int = MAX_INPUT_TOKENS
 ) -> tuple[str, bool]:
-    """Truncate text to at most max_tokens tokens. Returns (text, was_truncated)."""
-    token_ids = tokenizer.encode(text, add_special_tokens=False)
-    if len(token_ids) <= max_tokens:
+    """Truncate text to at most max_tokens tokens. Returns (text, was_truncated).
+
+    Only the first ``max_tokens * _MAX_CHARS_PER_TOKEN`` characters are
+    encoded. Encoding costs about 180 MB of peak memory per MB of text, on top
+    of a model already resident, and all but the budget is thrown away — a
+    40 MB file took 13 s and 8.5 GB to keep 16,384 tokens. A longer text
+    cannot fit the budget (see _MAX_CHARS_PER_TOKEN), so it is truncated
+    without looking further; a shorter one is encoded whole, as before.
+    """
+    limit = max_tokens * _MAX_CHARS_PER_TOKEN
+    token_ids = tokenizer.encode(text[:limit], add_special_tokens=False)
+    if len(text) <= limit and len(token_ids) <= max_tokens:
         return text, False
     return tokenizer.decode(token_ids[:max_tokens], skip_special_tokens=True), True
 
