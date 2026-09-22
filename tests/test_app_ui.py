@@ -294,6 +294,71 @@ class TestSidebarLayout:
         assert run_call.kwargs.get("width", "content") == "content"
 
 
+class TestUrlSettings:
+    """The run settings and the sample come back from the URL — no model needed.
+
+    A reload opens a new session — and with the file watcher off, a reload is
+    how a code edit takes effect — so without `bind="query-params"` every
+    reload put the toggles back on and the language back to "Match input".
+    AppTest does not write a changed value to the URL (that is the frontend's
+    job, checked live), so these seed `at.query_params` the way a reloaded or
+    bookmarked address does and read the widgets back. It does reflect the
+    drop of an unrecognized value, which the fallback test asserts.
+    """
+
+    def test_settings_and_sample_restore_from_the_url(self) -> None:
+        at = AppTest.from_file(APP)
+        at.query_params["language"] = "German"
+        at.query_params["feature_summary"] = "false"
+        at.query_params["sample_select"] = "Product review"
+        at.run()
+        assert not at.exception
+        assert at.selectbox(key="language").value == "German"
+        assert at.toggle(key="feature_summary").value is False
+        assert all(
+            at.toggle(key=f"feature_{f['key']}").value
+            for f in FEATURES
+            if f["key"] != "summary"
+        )
+        assert at.segmented_control(key="sample_select").value == "Product review"
+        # Restored, not merely displayed: the run a click would start uses them.
+        n = len(FEATURES)
+        expected = f"Sample · {n - 1} of {n} features · Output: German"
+        assert [c.value for c in _run_row(at).caption] == [expected]
+
+    @pytest.mark.parametrize(
+        "key, value",
+        [
+            pytest.param("language", "Klingon", id="unknown-language"),
+            pytest.param("feature_summary", "maybe", id="non-boolean-toggle"),
+            pytest.param("sample_select", "Nope", id="unknown-sample"),
+        ],
+    )
+    def test_an_unrecognized_value_falls_back_to_the_default(
+        self, key: str, value: str
+    ) -> None:
+        # A hand-edited or stale link (a renamed sample, a mistyped language)
+        # must not raise: the value is dropped from the URL and the widget
+        # keeps its default.
+        at = AppTest.from_file(APP)
+        at.query_params[key] = value
+        at.run()
+        assert not at.exception
+        assert key not in at.query_params
+        assert at.selectbox(key="language").value == "Match input"
+        assert all(toggle.value for toggle in at.toggle)
+        assert at.segmented_control(key="sample_select").value is None
+
+    def test_the_pasted_text_is_not_read_from_the_url(self) -> None:
+        # The paste is deliberately unbound: bound, the user's text would sit
+        # in the address bar and in browser history.
+        at = AppTest.from_file(APP)
+        at.query_params["paste"] = "Text from a link."
+        at.run()
+        assert not at.exception
+        assert at.text_area(key="paste").value == ""
+
+
 class TestRunRow:
     """The caption beside Run: why it is disabled, what to do before clicking,
     or what a click will run.

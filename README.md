@@ -38,6 +38,8 @@ The model (~7.3 GB, bf16) downloads automatically the first time you click **Run
 4. Click **Run**, beneath the input. The caption beside it says which input and how many analyses a click will run, that there is no text yet, or — when every analysis is switched off — why the button is disabled.
 5. Read the results in the tabs below, one per feature plus a combined **JSON** tab.
 
+The toggles, the output language and the chosen sample are kept in the page's address (for example `?language=German&feature_summary=false`), so a reload or a bookmark brings them back. Pasted text and uploaded files are not kept there.
+
 ## Configuration
 
 Both settings below are optional. Set them like any environment variable — in `.env` (gitignored, loaded automatically via `python-dotenv`) or as a real environment variable.

@@ -778,6 +778,19 @@ def _outranked_note(content: str, own_source: str, noun: str, source: str) -> No
 # chevron. In this vertical container the toggle labels wrap normally and
 # carry no native title tooltip, unlike their old placement directly in a
 # column; the Run row below is the one control that rule still touches.
+#
+# The settings are bound to the URL (bind="query-params", each widget's key
+# its parameter name), and so is the sample picker below. A reload opens a new
+# session — and with the file watcher off, a reload is how a code edit takes
+# effect — which put every toggle back on and the language back to "Match
+# input"; now the address carries them, and a bookmark keeps a configuration.
+# A value equal to the default stays out of the URL, and one the widget does
+# not recognize is dropped from it and falls back to the default without
+# raising. The pasted text and the upload are not bound: the paste would put
+# the user's text in the address bar and so in browser history, and a file
+# uploader cannot be bound at all. Renaming one of these keys orphans the
+# links that carry the old name — harmlessly, since the unknown parameter is
+# simply ignored.
 with st.sidebar:
     st.subheader("Features")
     enabled: dict[str, bool] = {
@@ -786,13 +799,16 @@ with st.sidebar:
             value=True,
             help=feature["help"],
             key=f"feature_{feature['key']}",
+            bind="query-params",
         )
         for feature in FEATURES
     }
     # Output language is global (applies to every feature), so it sits with
     # the other run settings; the sidebar's own width is the constraint the
     # old st.columns([1, 2]) existed to provide.
-    language = st.selectbox("Output language", LANGUAGES, key="language")
+    language = st.selectbox(
+        "Output language", LANGUAGES, key="language", bind="query-params"
+    )
     # Small app metadata — the one non-setting a sidebar should carry: the
     # model whose output the page shows (short name; the full id wraps to
     # three lines at the default sidebar width) and the cap the truncation
@@ -829,7 +845,10 @@ with upload_tab:
     )
 with sample_tab:
     choice = st.segmented_control(
-        "Pick a sample", list(SAMPLE_TEXTS), key="sample_select"
+        "Pick a sample",
+        list(SAMPLE_TEXTS),
+        key="sample_select",
+        bind="query-params",
     )
     sample_text = SAMPLE_TEXTS.get(choice, "")
 
