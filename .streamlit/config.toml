@@ -200,7 +200,11 @@ enableStaticServing = true
 # image-processors that is `import torch`, which is not installed. The result
 # was ~109 logged tracebacks and ~0.4 s after every Run, on every Run, since a
 # failed import never replaces the placeholder. Cost of "none": no automatic
-# rerun when a source file changes — press R, or restart `streamlit run`.
+# rerun when a source file changes, and pressing R does NOT apply an edit — R
+# reruns the compiled script Streamlit cached on the first run, which only this
+# watcher or the last open session disconnecting clears. To pick up an edit,
+# reload the app's only open tab or restart `streamlit run`; C (clear cache)
+# leaves the compiled script in place.
 fileWatcherType = "none"
 
 [browser]
