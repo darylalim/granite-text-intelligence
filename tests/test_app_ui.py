@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import streamlit as st
+from streamlit.elements.spinner import SpinnerMixin
 from streamlit.testing.v1 import AppTest
 
 from streamlit_app import (
@@ -568,6 +569,35 @@ class TestRunInteraction:
             at.button(key="run").click().run()
         assert not at.exception
         load.assert_called_once_with(MODEL_NAME)
+
+    def test_cold_load_shows_one_timed_spinner(self, patched_model: MagicMock) -> None:
+        # The autouse fixture clears the cache, so this Run is a cold load.
+        # Two spies, because the two spinners arrive by different routes: the
+        # app's `st.spinner` is a method bound at import, which a class patch
+        # cannot reach, while the cache opens its own through the class
+        # (`main_dg.spinner(..., _cache=True)`), which the module patch
+        # cannot see. Keying on `_cache` keeps the second assertion true
+        # whichever route a future Streamlit gives the app's call.
+        real_spinner = st.spinner
+        with (
+            patch("streamlit.spinner", wraps=real_spinner) as app_spinner,
+            patch.object(
+                SpinnerMixin, "spinner", autospec=True, side_effect=SpinnerMixin.spinner
+            ) as any_spinner,
+        ):
+            at = AppTest.from_file(APP)
+            at.run()
+            at.text_area(key="paste").set_value("Some text.")
+            at.button(key="run").click().run()
+        assert not at.exception
+        [loading] = [
+            c for c in app_spinner.call_args_list if c.args[0] == "Loading model…"
+        ]
+        # Timed, since a cold load or first download can take minutes.
+        assert loading.kwargs.get("show_time") is True
+        # And alone: the cache's default "Running `load_model(...)`." spinner
+        # would stack under it for the whole load.
+        assert not [c for c in any_spinner.call_args_list if c.kwargs.get("_cache")]
 
     def test_run_populates_results(self, patched_model: MagicMock) -> None:
         at = AppTest.from_file(APP)

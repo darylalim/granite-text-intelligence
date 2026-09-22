@@ -250,7 +250,7 @@ st.set_page_config(
 st.session_state.setdefault("results", None)
 
 
-@st.cache_resource(max_entries=1)
+@st.cache_resource(max_entries=1, show_spinner=False)
 def load_model(model_name: str) -> tuple[nn.Module, TokenizerWrapper]:
     """Load a model and its tokenizer, cached process-wide.
 
@@ -262,6 +262,11 @@ def load_model(model_name: str) -> tuple[nn.Module, TokenizerWrapper]:
     loaded first after MODEL_NAME changed, while the sidebar caption named the
     new one. max_entries=1 evicts the previous model when the id changes
     instead of holding both in memory.
+
+    show_spinner=False because the Run handler wraps the call in its own
+    timed "Loading model…" spinner. The default would stack a second one
+    under it for the whole of a cold load, reading "Running
+    `load_model(...)`." in code font.
     """
     # load() returns a 2- or 3-tuple (the 3-tuple only when return_config=True,
     # which we don't pass), so its declared type is a union; narrow to the
@@ -930,7 +935,10 @@ with st.container():
     elif run:
         with status_slot:
             try:
-                with st.spinner("Loading model…"):
+                # Timed: a cache miss is a 7.3 GB load, or a download the first
+                # time, and a counting clock is what says it has not hung. A
+                # hit returns inside the spinner's 0.5 s delay and shows none.
+                with st.spinner("Loading model…", show_time=True):
                     model, tokenizer = load_model(MODEL_NAME)
                 text, was_truncated = truncate_to_tokens(input_text, tokenizer)
                 data: dict[str, Any] = {}

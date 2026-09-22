@@ -19,7 +19,7 @@ uv sync
 uv run streamlit run streamlit_app.py
 ```
 
-The model (~7.3 GB, bf16) downloads automatically the first time you click **Run** (you'll see a "Loading model…" spinner) and is cached for later runs.
+The model (~7.3 GB, bf16) downloads automatically the first time you click **Run** (you'll see a "Loading model…" spinner counting the seconds) and is cached for later runs.
 
 ### Troubleshooting
 
