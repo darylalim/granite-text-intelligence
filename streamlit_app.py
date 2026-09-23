@@ -929,16 +929,19 @@ with st.container(horizontal=True, vertical_alignment="center"):
     st.caption(run_caption)
 
 # ---- Results: full width, below the Run row ----
-# Full width rather than a column: the tab strip below needs ~378 CSS px of
+# Full width rather than a column: the tab strip below needs ~372 CSS px of
 # label, and a full-width panel clears that at every desktop viewport with the
-# sidebar open or closed — 404 px at the 864 px worst case (measured; only a
-# phone-width window under ~410 px, where the 16 px padding leaves less, still
-# clips, and no Mac window is that narrow) — which is what retired the 2:3
-# column split that used to buy the room. The one way back to a clipped strip
-# is the sidebar itself: it is user-draggable and its width is remembered, so
-# past ~463 px at a 1000 px window the strip collapses on every later load,
-# until a double-click on the sidebar's edge resets it to 300 px. No
-# set_page_config option can bound the drag (see there).
+# sidebar open or closed — 414 px at the 864 px worst case (measured under the
+# theme; only a phone-width window under ~402 px, where the 15 px padding
+# leaves less, still clips, and no Mac window is that narrow) — which is what
+# retired the 2:3 column split that used to buy the room. The one way back to
+# a clipped strip is the sidebar itself: it is user-draggable and its width is
+# remembered, so past ~478 px at a 1000 px window (~342 at 864) the strip
+# scrolls and hides a label on every later load, until a double-click on the
+# sidebar's edge resets it to 300 px. No set_page_config option can bound the
+# drag (see there). These figures, like the Run row's above, move with the
+# theme's baseFontSize; CLAUDE.md's Architecture and Layout carry the
+# measurements.
 # The wrapper container makes the panel one addressable block — one `with`,
 # one node whose children TestResultsPanelStructure pins as exactly [status,
 # notices, tabs]. It does not protect against something emitted above it at
