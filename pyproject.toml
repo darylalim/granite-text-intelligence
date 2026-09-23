@@ -1,6 +1,6 @@
 [project]
 name = "granite-text-intelligence"
-version = "0.4.0"
+version = "0.5.0"
 description = "Streamlit application for summarization, topic, intent, and sentiment analysis using IBM Granite on Apple Silicon with MLX."
 license = "Apache-2.0"
 # static/fonts/ ships IBM Plex under the OFL, so its notice is declared alongside
