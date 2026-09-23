@@ -898,7 +898,7 @@ with sample_tab:
 # blurred the text area, and the rerun it caused enabled Run for a second
 # click. Enabled, the blur commit and the click land in the same rerun and
 # one click runs the pasted text (verified in headless Chrome). A click with
-# truly no input gets a warning in the status slot instead. The disabled
+# truly no input gets a warning among the notices instead. The disabled
 # reason is still computed once and drives both the button and the caption,
 # so a condition added to one cannot be missing from the other.
 #
@@ -1005,18 +1005,11 @@ with st.container():
     # next interaction — which is why it names no cause. A click that starts
     # a run is not reporting on the last one.
     interrupted = st.session_state.run_pending and not (run and input_text)
+    # Run stays enabled without input (see the Run row), so a click can
+    # arrive with nothing to analyze. It starts nothing, and says so below.
+    empty_click = run and not input_text
 
-    if run and not input_text:
-        # Run stays enabled without input (see the Run row), so a click can
-        # arrive with nothing to analyze. Say so where the run status goes and
-        # touch nothing else: the stored results and the slot order stand.
-        with status_slot:
-            st.warning(
-                "Nothing to analyze yet — paste text, upload a file or pick a "
-                "sample first.",
-                icon=":material/edit:",
-            )
-    elif run:
+    if run and input_text:
         st.session_state.run_pending = True
         with status_slot:
             lock = _inference_lock()
@@ -1071,8 +1064,21 @@ with st.container():
     results = cast("dict[str, Any] | None", st.session_state.results)
     # One `with` for every notice: st.empty() holds a single element, so a
     # second notice_slot.container() would replace the first.
-    if interrupted or results is not None:
+    if empty_click or interrupted or results is not None:
         with notice_slot.container():
+            if empty_click:
+                # A notice, not run status: status_slot is a container, which
+                # keeps a child the next rerun does not re-emit until that
+                # rerun *ends*, so the paste-and-click that follows this
+                # warning showed it, faded, through its whole model load and
+                # every generation. The notices st.empty() clears as the rerun
+                # starts. Nothing else is touched: the stored results and the
+                # slot order stand.
+                st.warning(
+                    "Nothing to analyze yet — paste text, upload a file or pick "
+                    "a sample first.",
+                    icon=":material/edit:",
+                )
             if interrupted:
                 st.info(
                     "The last run was stopped before it finished — click Run "

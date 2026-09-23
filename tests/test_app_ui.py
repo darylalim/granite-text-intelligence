@@ -101,8 +101,12 @@ class TestInitialRender:
             assert at.button(key="run").disabled is False
             at.button(key="run").click().run()
         assert not at.exception
-        status_slot = _results_panel(at).children[0]
-        assert any("Nothing to analyze" in w.value for w in status_slot.warning)
+        # Among the notices, whose st.empty() clears as the next rerun starts,
+        # and not in the status slot: a container keeps a child until the end
+        # of the next run, so the paste-and-click that follows showed the
+        # warning, faded, for the whole of that run.
+        assert [n for n in _notices(at) if "Nothing to analyze" in n]
+        assert not _results_panel(at).children[0].children
         assert at.session_state["results"] is None
         load.assert_not_called()
         generate.assert_not_called()
@@ -638,8 +642,9 @@ class TestRunInteraction:
             "flex_container",
             "tab_container",
         ]
-        assert any("Nothing to analyze" in w.value for w in panel.children[0].warning)
-        assert any("Inputs changed" in i.value for i in panel.children[1].info)
+        notices = _notices(at)
+        assert [n for n in notices if "Nothing to analyze" in n]
+        assert [n for n in notices if "Inputs changed" in n]
 
     def test_run_loads_the_configured_model(self, fake_tokenizer: MagicMock) -> None:
         # The call site passes MODEL_NAME — the id the sidebar caption names
@@ -998,9 +1003,9 @@ class TestInterruptedRun:
             at.button(key="run").click().run()
         generate.assert_not_called()
         assert at.session_state["run_pending"] is True
-        assert [n for n in _notices(at) if STOPPED_NOTE in n]
-        status_slot = _results_panel(at).children[0]
-        assert any("Nothing to analyze" in w.value for w in status_slot.warning)
+        notices = _notices(at)
+        assert [n for n in notices if STOPPED_NOTE in n]
+        assert [n for n in notices if "Nothing to analyze" in n]
 
 
 class TestRunFailures:
