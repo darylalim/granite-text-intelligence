@@ -309,6 +309,25 @@ class TestTruncateToTokens:
         assert truncated is expected_truncated
         assert out == ("truncated text" if expected_truncated else text)
 
+    def test_a_text_the_budget_can_span_is_kept_whole(self) -> None:
+        # 128 is written out, not read from _MAX_CHARS_PER_TOKEN, because it is
+        # measured, not tunable: Granite 4.2's longest token is a run of 128
+        # spaces, so max_tokens tokens can span max_tokens * 128 characters and
+        # a text that long may still fit. A lower constant would report such a
+        # text truncated and cut it, and every other test here reads the
+        # constant, so they pass with any value. A new vocabulary is
+        # re-measured by the smoke test in CLAUDE.md; raising the constant for
+        # one is always safe.
+        max_tokens = 10
+        text = " " * (max_tokens * 128)
+        tokenizer = MagicMock()
+        tokenizer.encode.return_value = list(range(max_tokens))
+
+        out, truncated = truncate_to_tokens(text, tokenizer, max_tokens)
+
+        assert truncated is False
+        assert out == text
+
 
 class TestLoadModel:
     """The model cache: process-wide, keyed on the id, one entry at a time."""
