@@ -565,7 +565,8 @@ class TestRenderResult:
         self, mock_st: MagicMock
     ) -> None:
         # A metric value is one ellipsized line; the intent is free text, and
-        # a real one ran to 133 characters. Captioned first, then the value.
+        # this real one (the News excerpt's, from a smoke test) runs to 132
+        # characters. Captioned first, then the value.
         intent = (
             "The author wants to inform about the city council's decision to "
             "expand the bike-lane network and its expected benefits and concerns."

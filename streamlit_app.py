@@ -701,7 +701,7 @@ def render_result(key: str, result: dict[str, Any]) -> None:
             st.caption("No topics found.")
     elif key == "intents":
         # Not st.metric: the intent is free text — anything from a snake_case
-        # label to a 130-character sentence — and a metric value is one
+        # label to a 132-character sentence — and a metric value is one
         # ellipsized line with no tooltip, so 4 of the 12 recorded smoke-test
         # intents were cut off at a 1000 px window. A subheader wraps. It still
         # parses Markdown (no switch to turn that off), hence the escape, and
