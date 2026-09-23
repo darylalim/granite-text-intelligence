@@ -1,5 +1,7 @@
 import json
-from collections.abc import Iterator
+import sys
+import threading
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -7,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import streamlit as st
 from streamlit.elements.spinner import SpinnerMixin
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 from streamlit.testing.v1 import AppTest
 
 from streamlit_app import (
@@ -27,6 +30,11 @@ def _clear_caches() -> Iterator[None]:
     st.cache_resource.clear()
     yield
     st.cache_resource.clear()
+
+
+# Captured at import, before any fixture patches it.
+_REAL_SPINNER = st.spinner
+_REAL_LOCK = threading.Lock
 
 
 def _refuse_to_wait(real_spinner: Any) -> Any:
@@ -56,7 +64,7 @@ def _no_lock_waits() -> Iterator[None]:
     AppTest's timeout joins a script thread that never returns — the suite
     hangs until CI's job timeout without naming a test.
     """
-    with patch("streamlit.spinner", side_effect=_refuse_to_wait(st.spinner)):
+    with patch("streamlit.spinner", side_effect=_refuse_to_wait(_REAL_SPINNER)):
         yield
 
 
@@ -925,6 +933,117 @@ class TestInferenceLock:
         at.button(key="run").click().run()
         assert not at.exception
         assert at.session_state["results"] is not None
+
+    def test_every_run_holds_the_one_process_lock(
+        self, patched_model: MagicMock
+    ) -> None:
+        # One lock for the process, taken and given back by each run. A lock
+        # made per run (or kept in st.session_state, one per session) and a
+        # run that skips the acquire both serialize nothing — and both pass
+        # every other test here, since AppTest never runs two scripts at once.
+        made: list[_CountingLock] = []
+
+        def make() -> _CountingLock:
+            made.append(_CountingLock())
+            return made[-1]
+
+        with _inference_lock_from(make):
+            at = AppTest.from_file(APP)
+            at.run()
+            at.text_area(key="paste").set_value("Some text.")
+            at.button(key="run").click().run()
+            at.button(key="run").click().run()
+        assert not at.exception
+        [lock] = made
+        assert (lock.acquired, lock.released) == (2, 2)
+
+    def test_a_run_stopped_while_it_waits_gives_the_lock_back(
+        self, patched_model: MagicMock
+    ) -> None:
+        # The first run finds the lock taken, waits, is granted it and is
+        # stopped by a superseding click in the same moment: StopException at
+        # the waiting spinner's exit, just after the grant. Only a wait
+        # inside the try whose finally releases the lock gives it back; a
+        # wait placed before the try leaks it, and the next run waits forever
+        # (reproduced live; here the autouse refusal turns that into a
+        # failure).
+        with _inference_lock_from(_ContendedLock):
+            at = AppTest.from_file(APP)
+            at.run()
+            at.text_area(key="paste").set_value("Some text.")
+            with patch("streamlit.spinner", _REAL_SPINNER):  # this run may wait
+                at.button(key="run").click().run()
+            assert at.session_state["run_pending"] is True  # it was stopped
+            at.button(key="run").click().run()
+        assert not at.exception
+        assert at.session_state["results"] is not None
+
+
+def _inference_lock_from(make: Callable[[], Any]) -> Any:
+    """Patch `threading.Lock` so that `_inference_lock`'s call returns make().
+
+    Found by the calling function's name, since AppTest executes the app's
+    source afresh and there is no module attribute to patch. Every other
+    caller — Streamlit's own locks, the spinner's, the cache's — still gets
+    a real lock. The autouse cache clear makes _inference_lock run again in
+    each test.
+    """
+
+    def lock_factory() -> Any:
+        if sys._getframe(1).f_code.co_name == "_inference_lock":
+            return make()
+        return _REAL_LOCK()
+
+    return patch("threading.Lock", lock_factory)
+
+
+class _CountingLock:
+    """A real lock that counts the acquires that succeeded, and the releases."""
+
+    def __init__(self) -> None:
+        self._lock = _REAL_LOCK()
+        self.acquired = 0
+        self.released = 0
+
+    def acquire(self, blocking: bool = True) -> bool:
+        granted = self._lock.acquire(blocking)
+        self.acquired += granted
+        return granted
+
+    def release(self) -> None:
+        self._lock.release()
+        self.released += 1
+
+
+class _ContendedLock:
+    """Taken on the first try; the wait that follows is granted and stopped.
+
+    The grant stands for another run finishing, and the stop request for a
+    click superseding this one while it waited: StopException is raised at
+    the next yield point, which is the waiting spinner's exit.
+    """
+
+    def __init__(self) -> None:
+        self.contended = False
+        self.held = False
+
+    def acquire(self, blocking: bool = True) -> bool:
+        if not blocking:
+            granted = self.contended and not self.held
+            self.contended = True
+            self.held = self.held or granted
+            return granted
+        if self.held:
+            raise AssertionError("a real lock would wait here forever")
+        ctx = get_script_run_ctx()
+        assert ctx is not None
+        assert ctx.script_requests is not None
+        ctx.script_requests.request_stop()
+        self.held = True
+        return True
+
+    def release(self) -> None:
+        self.held = False
 
 
 STOPPED_NOTE = "The last run was stopped"
