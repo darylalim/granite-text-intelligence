@@ -29,6 +29,37 @@ def _clear_caches() -> Iterator[None]:
     st.cache_resource.clear()
 
 
+def _refuse_to_wait(real_spinner: Any) -> Any:
+    """`st.spinner`, except that the wait for the inference lock raises.
+
+    A Run only waits when the lock is held, and inside AppTest — one script
+    at a time — nothing else can hold it, so a wait means a run leaked it.
+    Waiting would hang the test, so the spinner that opens the wait raises
+    instead, inside the run guard: a leak surfaces as an exception on the
+    page and a run that stored nothing.
+    """
+
+    def spinner(text: str, *args: Any, **kwargs: Any) -> Any:
+        if text.startswith("Waiting for another run"):
+            raise AssertionError("the inference lock was still held")
+        return real_spinner(text, *args, **kwargs)
+
+    return spinner
+
+
+@pytest.fixture(autouse=True)
+def _no_lock_waits() -> Iterator[None]:
+    """Fail on a leaked inference lock in *every* test, instead of hanging.
+
+    Not only in TestInferenceLock: any test that clicks Run twice runs into
+    a leak first, and there the second run blocks in lock.acquire() while
+    AppTest's timeout joins a script thread that never returns — the suite
+    hangs until CI's job timeout without naming a test.
+    """
+    with patch("streamlit.spinner", side_effect=_refuse_to_wait(st.spinner)):
+        yield
+
+
 _TOPICS_SYSTEM = next(f["system"] for f in FEATURES if f["key"] == "topics")
 # The second row has no confidence: a promoted / truncated topic must render
 # as an empty bar, not raise, and that column of one float and one NaN is the
@@ -853,24 +884,6 @@ class TestRunInteraction:
         assert any("Inputs changed" in info.value for info in at.info)
 
 
-def _refuse_to_wait(real_spinner: Any) -> Any:
-    """`st.spinner`, except that the wait for the inference lock raises.
-
-    A Run only waits when the lock is held, and inside AppTest — one script
-    at a time — nothing else can hold it, so a wait means a run leaked it.
-    Waiting would hang the test, so the spinner that opens the wait raises
-    instead, inside the run guard: a leak surfaces as an exception on the
-    page and a run that stored nothing.
-    """
-
-    def spinner(text: str, *args: Any, **kwargs: Any) -> Any:
-        if text.startswith("Waiting for another run"):
-            raise AssertionError("the inference lock was still held")
-        return real_spinner(text, *args, **kwargs)
-
-    return spinner
-
-
 def _stop_mid_run(*_: object, **__: object) -> str:
     """Stop the run from inside generate, as a superseding rerun does.
 
@@ -888,7 +901,8 @@ class TestInferenceLock:
     AppTest runs one script at a time, so the contention the lock exists for
     cannot happen here (it was exercised live, see Performance in CLAUDE.md);
     what can happen here is a run that leaks it, which would hang every later
-    run in the process.
+    run in the process. The autouse _no_lock_waits turns that wait into a
+    failure in every test of this file; this class is the named pin.
     """
 
     @pytest.mark.parametrize(
@@ -902,13 +916,13 @@ class TestInferenceLock:
     def test_the_next_run_does_not_wait(
         self, patched_model: MagicMock, first_generate: object
     ) -> None:
-        with patch("streamlit.spinner", side_effect=_refuse_to_wait(st.spinner)):
-            at = AppTest.from_file(APP)
-            at.run()
-            at.text_area(key="paste").set_value("Some text.")
-            with patch("mlx_lm.generate", side_effect=first_generate):
-                at.button(key="run").click().run()
+        # A wait raises rather than hangs: see _no_lock_waits.
+        at = AppTest.from_file(APP)
+        at.run()
+        at.text_area(key="paste").set_value("Some text.")
+        with patch("mlx_lm.generate", side_effect=first_generate):
             at.button(key="run").click().run()
+        at.button(key="run").click().run()
         assert not at.exception
         assert at.session_state["results"] is not None
 
