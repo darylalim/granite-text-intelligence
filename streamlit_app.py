@@ -13,7 +13,11 @@ from mlx_lm import generate, load
 from mlx_lm.sample_utils import make_logits_processors, make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 
-load_dotenv()  # populate HF_TOKEN from .env; deploy env vars take precedence
+# Populate HF_TOKEN (and MAX_INPUT_TOKENS) from .env; deploy env vars take
+# precedence. Deliberately not st.secrets: Streamlit copies secrets.toml into
+# os.environ *over* a real deploy variable, and only under `streamlit run`,
+# never in pytest or a bare import — see CLAUDE.md, Environment.
+load_dotenv()
 
 # IBM's own MLX conversion of ibm-granite/granite-4.2-3b, full-precision bf16:
 # ~7.3 GB of weights, converted by IBM's release pipeline with the same mlx-lm
